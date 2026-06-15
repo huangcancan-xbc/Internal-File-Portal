@@ -1,0 +1,269 @@
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Fira Sans', system-ui, sans-serif;
+  --font-mono: 'Fira Code', ui-monospace, monospace;
+}
+
+/* ═══════════════════════════════════════════
+   Vibrant Warm Palette
+   ═══════════════════════════════════════════ */
+:root {
+  --color-bg: #FFF5EE;
+  --color-surface: #FFFFFF;
+  --color-border: #F0D5C0;
+  --color-border-light: #E8C8A8;
+  --color-text: #3E2723;
+  --color-text-muted: #6D4C41;
+  --color-text-subtle: #A1887F;
+  --color-primary: #E5783E;
+  --color-primary-hover: #D0682E;
+  --color-primary-light: #FFF0E6;
+  --color-primary-subtle: #FFE4D0;
+  --color-danger: #C44C4C;
+  --color-danger-light: #FFF0F0;
+  --color-success: #6B9E7A;
+  --color-success-light: #F0F7F2;
+  --color-warning: #E0A030;
+  --color-warning-light: #FFF8EE;
+  --color-cta: #D45D3E;
+  --color-cta-hover: #C04D30;
+
+  --shadow-card: 0 4px 20px rgba(120,60,20,0.08), 0 1px 3px rgba(120,60,20,0.04);
+  --shadow-card-hover: 0 8px 30px rgba(120,60,20,0.12), 0 2px 6px rgba(120,60,20,0.06);
+  --shadow-elevated: 0 12px 40px rgba(120,60,20,0.10);
+  --radius-card: 16px;
+  --radius-input: 12px;
+  --radius-btn: 12px;
+}
+
+/* ═══════════════════════════════════════════
+   Dark Mode — OLED with bold warm accents
+   ═══════════════════════════════════════════ */
+.dark {
+  --color-bg: #0A0A0A;
+  --color-surface: #141414;
+  --color-border: #2A2A2A;
+  --color-border-light: #383838;
+  --color-text: #F5F0EB;
+  --color-text-muted: #B8A898;
+  --color-text-subtle: #7A6E62;
+  --color-primary: #FF8C42;
+  --color-primary-hover: #FFA366;
+  --color-primary-light: #1E1410;
+  --color-primary-subtle: #281810;
+  --color-danger: #FF5E5E;
+  --color-danger-light: #1E1414;
+  --color-success: #5EFFB1;
+  --color-success-light: #0E1E16;
+  --color-warning: #FFB347;
+  --color-warning-light: #1E180E;
+  --color-cta: #FF6B3D;
+  --color-cta-hover: #FF8555;
+
+  --shadow-card: 0 4px 20px rgba(0,0,0,0.4);
+  --shadow-card-hover: 0 8px 30px rgba(255,140,66,0.08), 0 2px 6px rgba(0,0,0,0.5);
+  --shadow-elevated: 0 12px 40px rgba(0,0,0,0.5);
+}
+
+/* ═══════════════════════════════════════════
+   Base
+   ═══════════════════════════════════════════ */
+body {
+  margin: 0;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: 'Fira Sans', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ═══════════════════════════════════════════
+   Login Page Background
+   ═══════════════════════════════════════════ */
+.login-bg {
+  background:
+    radial-gradient(ellipse 80% 60% at 20% 80%, var(--color-primary-subtle) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 80% at 80% 20%, var(--color-primary-light) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 50% at 50% 50%, var(--color-warning-light) 0%, transparent 50%),
+    linear-gradient(135deg, var(--color-bg) 0%, #FFF0E0 50%, var(--color-bg) 100%);
+}
+
+/* ═══════════════════════════════════════════
+   Block-based Card System
+   ═══════════════════════════════════════════ */
+[class*="bg-\[var\(--color-surface\)\]"] {
+  border-radius: var(--radius-card) !important;
+  box-shadow: var(--shadow-card) !important;
+}
+
+/* KPI / Grid cards — bigger impact */
+.grid > .bg-\[var\(--color-surface\)\] {
+  box-shadow: var(--shadow-card) !important;
+  transition: box-shadow 0.35s cubic-bezier(0.25, 0.8, 0.25, 1.2), transform 0.35s cubic-bezier(0.25, 0.8, 0.25, 1.2) !important;
+}
+.grid > .bg-\[var\(--color-surface\)\]:hover {
+  box-shadow: var(--shadow-card-hover) !important;
+  transform: translateY(-3px);
+}
+
+/* Inputs & selects */
+input[type="text"], input[type="password"], input[type="number"],
+input[type="email"], input[type="search"], select, textarea {
+  border-radius: var(--radius-input) !important;
+}
+input:focus, select:focus, textarea:focus {
+  box-shadow: 0 0 0 3px var(--color-primary-subtle) !important;
+  border-color: var(--color-primary) !important;
+}
+
+/* Primary buttons — vibrant */
+button[class*="bg-\[var\(--color-primary\)\]"] {
+  border-radius: var(--radius-btn) !important;
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1.2) !important;
+}
+button[class*="bg-\[var\(--color-primary\)\]"]:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-card-hover) !important;
+}
+button[class*="bg-\[var\(--color-primary\)\]"]:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* Modals */
+.rounded-2xl.shadow-2xl {
+  border-radius: 20px !important;
+  box-shadow: var(--shadow-elevated) !important;
+}
+
+/* Sidebar active — soft glow */
+nav a[class*="bg-\[var\(--color-primary-light\)\]"] {
+  border-radius: var(--radius-input) !important;
+}
+
+/* Table row hover */
+tr[class*="hover:bg"]:hover {
+  transform: translateX(2px);
+  box-shadow: var(--shadow-card) !important;
+  position: relative;
+  z-index: 1;
+  border-radius: 8px;
+}
+
+/* ═══════════════════════════════════════════
+   Block-based Layout — generous spacing
+   ═══════════════════════════════════════════ */
+.space-y-6 > * + * { margin-top: 1.5rem; }
+main > .space-y-6:first-child { padding-top: 0.5rem; }
+
+h1 { letter-spacing: -0.02em; }
+
+/* ═══════════════════════════════════════════
+   Motion-Driven Animations
+   ═══════════════════════════════════════════ */
+
+/* Page section entrance */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+main > .space-y-6 > * {
+  animation: fadeUp 0.5s ease-out backwards;
+}
+main > .space-y-6 > *:nth-child(1) { animation-delay: 0.05s; }
+main > .space-y-6 > *:nth-child(2) { animation-delay: 0.10s; }
+main > .space-y-6 > *:nth-child(3) { animation-delay: 0.15s; }
+main > .space-y-6 > *:nth-child(4) { animation-delay: 0.20s; }
+main > .space-y-6 > *:nth-child(5) { animation-delay: 0.25s; }
+
+/* Login card entrance */
+@keyframes loginEnter {
+  from { opacity: 0; transform: translateY(30px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.login-enter {
+  animation: loginEnter 0.6s cubic-bezier(0.25, 0.8, 0.25, 1.2);
+}
+
+/* Pulse dot for notifications */
+@keyframes pulseDot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.3); opacity: 0.7; }
+}
+.notification-dot {
+  animation: pulseDot 2s ease-in-out infinite;
+}
+
+/* Slide-in for modals and toasts */
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(-12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-in { animation: slideIn 0.3s ease-out; }
+
+/* Shimmer loading */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--color-border) 25%, var(--color-border-light) 50%, var(--color-border) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 8px;
+}
+
+/* ═══════════════════════════════════════════
+   Scrollbar
+   ═══════════════════════════════════════════ */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border-light); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-subtle); }
+
+/* ═══════════════════════════════════════════
+   Focus ring
+   ═══════════════════════════════════════════ */
+*:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+  box-shadow: 0 0 0 4px var(--color-primary-subtle);
+}
+
+/* ═══════════════════════════════════════════
+   Theme Scan Line Transition
+   ═══════════════════════════════════════════ */
+.theme-scan-line {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  background: linear-gradient(135deg,
+    transparent 0%,
+    transparent 40%,
+    rgba(255,140,66,0.12) 48%,
+    rgba(255,180,70,0.25) 50%,
+    rgba(255,140,66,0.12) 52%,
+    transparent 60%,
+    transparent 100%
+  );
+  background-size: 300% 300%;
+  animation: themeScan 2.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes themeScan {
+  0%   { background-position: 100% 100%; }
+  100% { background-position: 0% 0%; }
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

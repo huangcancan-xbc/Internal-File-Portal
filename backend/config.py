@@ -1,0 +1,55 @@
+import os
+from datetime import timedelta
+
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+
+
+class Config:
+    # Flask
+    SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production-at-least-32-bytes')
+
+    # Database
+    SQLALCHEMY_DATABASE_URI = os.environ.get(
+        'DATABASE_URL', f'sqlite:///{os.path.join(BASE_DIR, "app.db")}'
+    )
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+
+    # JWT
+    JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'jwt-dev-secret-key-change-in-production-32bytes!')
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=2)
+    JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
+
+    # File storage
+    UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+    PUBLIC_FOLDER = os.path.join(UPLOAD_FOLDER, 'public')
+    PRIVATE_FOLDER = os.path.join(UPLOAD_FOLDER, 'private')
+    MAX_CONTENT_LENGTH = 100 * 1024 * 1024  # 100MB per request
+
+    # File policy
+    ALLOWED_EXTENSIONS = {
+        'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'pdf', 'txt', 'csv',
+        'md', 'json', 'xml', 'yaml', 'yml', 'log', 'html', 'htm', 'css',
+        'jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp', 'ico',
+        'zip', 'rar', '7z', 'tar', 'gz', 'bz2',
+        'mp3', 'mp4', 'avi', 'mov', 'wav', 'flac',
+    }
+    BLOCKED_EXTENSIONS = {
+        'exe', 'bat', 'cmd', 'sh', 'ps1', 'vbs', 'js', 'msi', 'dll', 'scr',
+    }
+    SINGLE_FILE_MAX_SIZE = 50 * 1024 * 1024  # 50MB
+    BATCH_MAX_SIZE = 200 * 1024 * 1024  # 200MB
+
+    # Password policy
+    PASSWORD_MIN_LENGTH = 8
+    PASSWORD_EXPIRE_DAYS = 90
+    PASSWORD_REQUIRE_UPPER = True
+    PASSWORD_REQUIRE_LOWER = True
+    PASSWORD_REQUIRE_DIGIT = True
+    PASSWORD_REQUIRE_SPECIAL = True
+
+    # Account lockout
+    LOGIN_MAX_ATTEMPTS = 5
+    LOGIN_LOCKOUT_MINUTES = 30
+
+    # Session
+    SESSION_TIMEOUT_MINUTES = 30

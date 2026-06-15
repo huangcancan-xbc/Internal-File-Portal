@@ -1,0 +1,556 @@
+import os
+import uuid
+import shutil
+from datetime import datetime, timezone
+from flask import current_app, request, send_file
+from models import db
+from models.user import User, ROLE_ADMIN
+from models.file import Directory, FileRecord
+from models.log import AuditLog, CopyAudit
+from utils.validators import allowed_file, get_file_extension
+from utils.request import get_client_ip, get_client_ua
+
+
+def _audit(user, action, detail, file_record=None):
+    ip = get_client_ip() if request else 'system'
+    ua = get_client_ua() if request else ''
+    log = AuditLog(
+        user_id=user.id, account=user.account, username=user.username,
+        ip=ip, user_agent=ua, module='file', action=action, detail=detail,
+    )
+    db.session.add(log)
+    db.session.commit()
+
+
+def _physical_path(scope, user_id, filename):
+    """Generate physical storage path for a file."""
+    unique_name = f"{uuid.uuid4().hex}_{filename}"
+    if scope == 'public':
+        return os.path.join(current_app.config['PUBLIC_FOLDER'], unique_name)
+    else:
+        user_dir = os.path.join(current_app.config['PRIVATE_FOLDER'], str(user_id))
+        os.makedirs(user_dir, exist_ok=True)
+        return os.path.join(user_dir, unique_name)
+
+
+def _get_or_create_dir(scope, user_id, dir_name, parent_path=None):
+    """Get or create a directory."""
+    if parent_path:
+        path = f"{parent_path.rstrip('/')}/{dir_name}"
+    else:
+        path = f"/{scope}/{dir_name}"
+
+    d = Directory.query.filter_by(path=path).first()
+    if d:
+        return d
+
+    parent = None
+    if parent_path:
+        parent = Directory.query.filter_by(path=parent_path).first()
+
+    d = Directory(
+        name=dir_name,
+        parent_id=parent.id if parent else None,
+        scope=scope,
+        owner_id=user_id if scope == 'private' else None,
+        path=path,
+    )
+    db.session.add(d)
+    db.session.flush()
+    return d
+
+
+def init_root_directories():
+    """Create root public and private directories if they don't exist."""
+    for scope in ('public', 'private'):
+        path = f'/{scope}'
+        if not Directory.query.filter_by(path=path).first():
+            d = Directory(name=scope, scope=scope, path=path)
+            db.session.add(d)
+    db.session.commit()
+
+
+def upload_file(user, files, directory_id=None, scope='public'):
+    """Upload one or multiple files. Returns (success, result)."""
+    if not files:
+        return False, '未选择文件'
+
+    # Permission check
+    if scope == 'public' and not user.is_admin():
+        from models.user import UserPermission, PERM_UPLOAD
+        perm = UserPermission.query.filter_by(user_id=user.id, scope='public',
+                                               directory_id=directory_id).first()
+        if not perm or not perm.has_permission(PERM_UPLOAD):
+            # Check default public permission
+            perm = UserPermission.query.filter_by(user_id=user.id, scope='public',
+                                                   directory_id=None).first()
+            if not perm or not perm.has_permission(PERM_UPLOAD):
+                return False, '没有上传权限'
+
+    max_size = current_app.config.get('SINGLE_FILE_MAX_SIZE', 50 * 1024 * 1024)
+    directory = Directory.query.get(directory_id) if directory_id else None
+
+    success_count = 0
+    fail_count = 0
+    results = []
+
+    for f in files:
+        filename = f.filename
+        if not filename:
+            fail_count += 1
+            results.append({'filename': filename, 'status': 'failure', 'reason': '文件名为空'})
+            continue
+
+        if not allowed_file(filename):
+            fail_count += 1
+            results.append({'filename': filename, 'status': 'failure', 'reason': '文件格式不允许'})
+            continue
+
+        # Read file to check size
+        f.seek(0, 2)
+        size = f.tell()
+        f.seek(0)
+
+        if size > max_size:
+            fail_count += 1
+            results.append({'filename': filename, 'status': 'failure',
+                            'reason': f'文件大小超过限制（最大{max_size // 1024 // 1024}MB）'})
+            continue
+
+        actual_scope = scope
+        owner_id = user.id
+
+        file_path = _physical_path(actual_scope, user.id, filename)
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        f.save(file_path)
+
+        ext = get_file_extension(filename)
+        record = FileRecord(
+            filename=os.path.basename(file_path),
+            original_filename=filename,
+            file_path=file_path,
+            file_size=size,
+            file_type=ext,
+            mime_type=f.content_type,
+            directory_id=directory.id if directory else None,
+            owner_id=owner_id,
+            scope=actual_scope,
+        )
+        db.session.add(record)
+        db.session.flush()
+        success_count += 1
+        results.append({'filename': filename, 'status': 'success', 'file_id': record.id})
+
+    db.session.commit()
+
+    dir_name = directory.name if directory else '根目录'
+    _audit(user, 'upload',
+           f'上传了 {success_count} 个文件到「{dir_name}」' + (f'（{fail_count} 个失败）' if fail_count else ''))
+
+    return True, {
+        'success_count': success_count,
+        'fail_count': fail_count,
+        'results': results,
+    }
+
+
+def download_file(user, file_id, copy_type=None):
+    """Download a file. Returns (success, result_or_error).
+
+    Args:
+        copy_type: None='download', 'local'=拷贝到本地, 'external'=拷贝到外接设备
+    """
+    record = FileRecord.query.get(file_id)
+    if not record or record.status == 'deleted':
+        return False, '文件不存在'
+
+    # Permission check
+    if record.scope == 'public' and not user.is_admin():
+        from models.user import UserPermission, PERM_DOWNLOAD
+        perm = UserPermission.query.filter_by(user_id=user.id, scope='public',
+                                               directory_id=record.directory_id).first()
+        if not perm or not perm.has_permission(PERM_DOWNLOAD):
+            perm = UserPermission.query.filter_by(user_id=user.id, scope='public',
+                                                   directory_id=None).first()
+            if not perm or not perm.has_permission(PERM_DOWNLOAD):
+                return False, '没有下载权限'
+    elif record.scope == 'private' and record.owner_id != user.id and not user.is_admin():
+        return False, '没有权限访问该文件'
+
+    if not os.path.exists(record.file_path):
+        return False, '文件已丢失'
+
+    # Audit logging
+    if copy_type == 'local':
+        _audit(user, 'copy_to_local', f'拷贝「{record.original_filename}」到本地', record)
+        ip = get_client_ip() if request else 'system'
+        ua = get_client_ua() if request else ''
+        copy_log = CopyAudit(
+            user_id=user.id, account=user.account, username=user.username,
+            file_id=record.id,
+            source_filename=record.original_filename,
+            source_path=record.file_path,
+            target_path='[download to local]',
+            file_size=record.file_size,
+            copy_type='local', ip=ip, user_agent=ua,
+        )
+        db.session.add(copy_log)
+        db.session.commit()
+    else:
+        _audit(user, 'download', f'下载了「{record.original_filename}」', record)
+
+    return True, send_file(
+        record.file_path,
+        as_attachment=True,
+        download_name=record.original_filename,
+    )
+
+
+def list_files(user, scope='public', directory_id=None, page=1, per_page=20,
+               keyword=None, file_type=None):
+    """List files with filters."""
+    query = FileRecord.query.filter_by(status='active')
+
+    if scope == 'public':
+        query = query.filter_by(scope='public')
+    else:
+        if user.is_admin():
+            query = query.filter_by(scope='private')
+        else:
+            query = query.filter_by(scope='private', owner_id=user.id)
+
+    if directory_id:
+        query = query.filter_by(directory_id=directory_id)
+
+    if keyword:
+        query = query.filter(FileRecord.original_filename.like(f'%{keyword}%'))
+    if file_type:
+        query = query.filter_by(file_type=file_type)
+
+    pagination = query.order_by(FileRecord.created_at.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+    # Total size across ALL matching files
+    total_size = query.with_entities(db.func.coalesce(db.func.sum(FileRecord.file_size), 0)).scalar()
+    return {
+        'items': [f.to_dict() for f in pagination.items],
+        'total': pagination.total,
+        'total_size': total_size,
+        'page': page,
+        'per_page': per_page,
+        'pages': pagination.pages,
+    }
+
+
+def delete_file(user, file_id):
+    """Soft-delete a file (move to recycle bin)."""
+    record = FileRecord.query.get(file_id)
+    if not record or record.status == 'deleted':
+        return False, '文件不存在'
+
+    if record.scope == 'private' and record.owner_id != user.id and not user.is_admin():
+        return False, '没有权限删除该文件'
+    if record.scope == 'public' and not user.is_admin():
+        return False, '公共目录文件仅管理员可删除'
+
+    record.status = 'deleted'
+    db.session.commit()
+    _audit(user, 'delete', f'将「{record.original_filename}」移入回收站', record)
+    return True, '文件已移入回收站'
+
+
+def list_deleted_files(user, page=1, per_page=20, keyword=None):
+    """List files in recycle bin."""
+    query = FileRecord.query.filter_by(status='deleted')
+    if not user.is_admin():
+        query = query.filter_by(owner_id=user.id)
+    if keyword:
+        query = query.filter(FileRecord.original_filename.like(f'%{keyword}%'))
+    pagination = query.order_by(FileRecord.updated_at.desc()).paginate(
+        page=page, per_page=per_page, error_out=False)
+    return {
+        'items': [f.to_dict() for f in pagination.items],
+        'total': pagination.total,
+        'page': page,
+        'per_page': per_page,
+        'pages': pagination.pages,
+    }
+
+
+def restore_file(user, file_id):
+    """Restore a file from recycle bin."""
+    record = FileRecord.query.get(file_id)
+    if not record or record.status != 'deleted':
+        return False, '文件不在回收站中'
+    if not user.is_admin() and record.owner_id != user.id:
+        return False, '没有权限恢复该文件'
+    record.status = 'active'
+    db.session.commit()
+    _audit(user, 'restore', f'从回收站恢复了「{record.original_filename}」', record)
+    return True, record.to_dict()
+
+
+def permanent_delete_file(user, file_id):
+    """Permanently delete a file from recycle bin (remove physical file)."""
+    record = FileRecord.query.get(file_id)
+    if not record or record.status != 'deleted':
+        return False, '文件不在回收站中'
+    if not user.is_admin() and record.owner_id != user.id:
+        return False, '没有权限删除该文件'
+
+    # Remove physical file
+    if record.file_path and os.path.exists(record.file_path):
+        try:
+            os.remove(record.file_path)
+        except OSError:
+            pass
+
+    name = record.original_filename
+    db.session.delete(record)
+    db.session.commit()
+    _audit(user, 'permanent_delete', f'永久删除了「{name}」')
+    return True, '文件已永久删除'
+
+
+def empty_recycle_bin(user):
+    """Permanently delete all files in recycle bin."""
+    query = FileRecord.query.filter_by(status='deleted')
+    if not user.is_admin():
+        query = query.filter_by(owner_id=user.id)
+
+    records = query.all()
+    count = 0
+    for record in records:
+        if record.file_path and os.path.exists(record.file_path):
+            try:
+                os.remove(record.file_path)
+            except OSError:
+                pass
+        db.session.delete(record)
+        count += 1
+
+    db.session.commit()
+    _audit(user, 'empty_recycle_bin', f'清空了回收站，永久删除 {count} 个文件')
+    return True, f'已永久删除 {count} 个文件'
+
+
+def rename_file(user, file_id, new_name):
+    """Rename a file."""
+    record = FileRecord.query.get(file_id)
+    if not record or record.status == 'deleted':
+        return False, '文件不存在'
+
+    if record.scope == 'public' and not user.is_admin():
+        return False, '公共目录文件仅管理员可重命名'
+    if record.scope == 'private' and record.owner_id != user.id and not user.is_admin():
+        return False, '没有权限重命名该文件'
+
+    old_name = record.original_filename
+    record.original_filename = new_name
+    record.file_type = get_file_extension(new_name)
+    db.session.commit()
+    _audit(user, 'rename', f'将「{old_name}」重命名为「{new_name}」', record)
+    return True, record.to_dict()
+
+
+def move_file(user, file_id, target_directory_id):
+    """Move a file to another directory."""
+    record = FileRecord.query.get(file_id)
+    if not record or record.status == 'deleted':
+        return False, '文件不存在'
+
+    if record.scope == 'public' and not user.is_admin():
+        return False, '仅管理员可移动公共目录文件'
+    if record.scope == 'private' and record.owner_id != user.id and not user.is_admin():
+        return False, '没有权限移动该文件'
+
+    target_dir = Directory.query.get(target_directory_id)
+    if not target_dir:
+        return False, '目标目录不存在'
+
+    old_dir = record.directory_id
+    record.directory_id = target_directory_id
+    db.session.commit()
+    target_dir = Directory.query.get(target_directory_id)
+    _audit(user, 'move',
+           f'将「{record.original_filename}」移动到「{target_dir.name if target_dir else "根目录"}」',
+           record)
+    return True, record.to_dict()
+
+
+def copy_file(user, file_id, target_directory_id=None, copy_type='internal'):
+    """Copy a file within the system."""
+    record = FileRecord.query.get(file_id)
+    if not record or record.status == 'deleted':
+        return False, '源文件不存在'
+
+    if record.scope == 'public' and not user.is_admin():
+        from models.user import UserPermission, PERM_COPY
+        perm = UserPermission.query.filter_by(user_id=user.id, scope='public').first()
+        if not perm or not perm.has_permission(PERM_COPY):
+            return False, '没有拷贝权限'
+
+    new_path = _physical_path(record.scope, user.id, record.original_filename)
+    shutil.copy2(record.file_path, new_path)
+
+    new_record = FileRecord(
+        filename=os.path.basename(new_path),
+        original_filename=record.original_filename,
+        file_path=new_path,
+        file_size=record.file_size,
+        file_type=record.file_type,
+        mime_type=record.mime_type,
+        directory_id=target_directory_id or record.directory_id,
+        owner_id=user.id,
+        scope=record.scope,
+    )
+    db.session.add(new_record)
+    db.session.flush()
+
+    # Copy audit
+    ip = get_client_ip() if request else 'system'
+    ua = get_client_ua() if request else ''
+    copy_log = CopyAudit(
+        user_id=user.id, account=user.account, username=user.username,
+        file_id=record.id,
+        source_filename=record.original_filename,
+        source_path=record.file_path,
+        target_path=new_path,
+        file_size=record.file_size,
+        copy_type=copy_type, ip=ip, user_agent=ua,
+    )
+    db.session.add(copy_log)
+    db.session.commit()
+
+    _audit(user, 'copy',
+           f'拷贝了「{record.original_filename}」', record)
+    return True, new_record.to_dict()
+
+
+def list_directories(user, scope='public', parent_id=None):
+    """List directories."""
+    query = Directory.query.filter_by(scope=scope)
+    if parent_id:
+        query = query.filter_by(parent_id=parent_id)
+    else:
+        query = query.filter_by(parent_id=None)
+
+    if scope == 'private' and not user.is_admin():
+        query = query.filter_by(owner_id=user.id)
+
+    dirs = query.order_by(Directory.name).all()
+    return [d.to_dict() for d in dirs]
+
+
+def create_directory(user, name, scope='public', parent_id=None):
+    """Create a new directory."""
+    if scope == 'public' and not user.is_admin():
+        return False, '仅管理员可创建公共目录'
+
+    parent_path = f'/{scope}'
+    if parent_id:
+        parent = Directory.query.get(parent_id)
+        if not parent:
+            return False, '父目录不存在'
+        parent_path = parent.path
+
+    path = f"{parent_path.rstrip('/')}/{name}"
+    if Directory.query.filter_by(path=path).first():
+        return False, f'目录 "{name}" 已存在'
+
+    d = Directory(
+        name=name, parent_id=parent_id, scope=scope,
+        owner_id=user.id if scope == 'private' else None,
+        path=path, created_by=user.id,
+    )
+    db.session.add(d)
+    db.session.commit()
+    parent_name = '根目录'
+    if parent_id:
+        p = Directory.query.get(parent_id)
+        if p: parent_name = p.name
+    _audit(user, 'create_directory', f'在「{parent_name}」下创建了目录「{name}」')
+    return True, d.to_dict()
+
+
+def delete_directory(user, dir_id):
+    """Delete an empty directory."""
+    d = Directory.query.get(dir_id)
+    if not d:
+        return False, '目录不存在'
+    if d.scope == 'public' and not user.is_admin():
+        return False, '仅管理员可删除公共目录'
+    if d.children.count() > 0:
+        return False, '目录不为空，无法删除'
+    if d.files.filter_by(status='active').count() > 0:
+        return False, '目录下有文件，无法删除'
+
+    db.session.delete(d)
+    db.session.commit()
+    _audit(user, 'delete_directory', f'删除了目录「{d.name}」')
+    return True, '目录已删除'
+
+
+def get_file_preview(user, file_id):
+    """Get file for preview (inline display)."""
+    record = FileRecord.query.get(file_id)
+    if not record or record.status == 'deleted':
+        return False, '文件不存在'
+
+    if record.scope == 'private' and record.owner_id != user.id and not user.is_admin():
+        return False, '没有权限访问该文件'
+
+    if not os.path.exists(record.file_path):
+        return False, '文件已丢失'
+
+    _audit(user, 'preview', f'预览了「{record.original_filename}」', record)
+
+    ext = os.path.splitext(record.original_filename)[1].lower()
+
+    # Word → HTML
+    if ext in ('.docx', '.doc'):
+        try:
+            from docx import Document
+            doc = Document(record.file_path)
+            html = '<div style="max-width:900px;margin:0 auto;padding:24px;font-family:sans-serif;color:#1E293B;">'
+            for p in doc.paragraphs:
+                if p.style.name.startswith('Heading'):
+                    level = int(p.style.name[-1]) if p.style.name[-1].isdigit() else 1
+                    sizes = {1:24, 2:20, 3:16, 4:14}
+                    html += f'<h{level} style="font-size:{sizes.get(level,16)}px;margin:0.5em 0;font-weight:600;">{p.text}</h{level}>'
+                elif p.text.strip():
+                    html += f'<p style="margin:0.4em 0;line-height:1.7;">{p.text}</p>'
+            html += '</div>'
+            from flask import make_response
+            resp = make_response(html)
+            resp.headers['Content-Type'] = 'text/html; charset=utf-8'
+            return True, resp
+        except Exception:
+            pass  # Fall through to raw send
+
+    # Excel → HTML table
+    if ext in ('.xlsx', '.xls'):
+        try:
+            from openpyxl import load_workbook
+            wb = load_workbook(record.file_path, data_only=True)
+            sheet = wb.active
+            html = '<div style="max-width:100%;overflow:auto;padding:16px;">'
+            html += '<table style="border-collapse:collapse;font-family:sans-serif;font-size:13px;">'
+            for row in sheet.iter_rows(values_only=True):
+                html += '<tr>'
+                for cell in row:
+                    val = str(cell) if cell is not None else ''
+                    html += f'<td style="border:1px solid #D5D8DC;padding:6px 10px;min-width:80px;color:#1E293B;">{val}</td>'
+                html += '</tr>'
+            html += '</table></div>'
+            from flask import make_response
+            resp = make_response(html)
+            resp.headers['Content-Type'] = 'text/html; charset=utf-8'
+            return True, resp
+        except Exception:
+            pass  # Fall through to raw send
+
+    return True, send_file(
+        record.file_path,
+        mimetype=record.mime_type or 'application/octet-stream',
+    )
