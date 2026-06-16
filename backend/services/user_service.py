@@ -4,14 +4,14 @@ from models import db
 from models.user import User, UserPermission, ROLE_ADMIN, ROLE_USER, PERM_ALL, PERM_VIEW, PERM_UPLOAD, PERM_DOWNLOAD, DEPT_CHOICES
 from models.log import AuditLog
 from utils.validators import validate_password
+from utils.request import get_client_ip, get_client_ua
 
 
 def _audit(user_id, account, username, action, detail, target_account=None):
-    ip = request.headers.get('X-Forwarded-For', request.remote_addr or 'unknown') if request else 'system'
-    ua = request.headers.get('User-Agent', '')[:500] if request else ''
     log = AuditLog(
         user_id=user_id, account=account, username=username,
-        ip=ip, user_agent=ua, module='user', action=action, detail=detail,
+        ip=get_client_ip() if request else 'system', user_agent=get_client_ua() if request else '',
+        module='user', action=action, detail=detail, status='success',
     )
     db.session.add(log)
     db.session.commit()

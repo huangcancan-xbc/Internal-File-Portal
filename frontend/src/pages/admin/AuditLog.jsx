@@ -1,102 +1,328 @@
-import { useState, useEffect } from 'react'
-import { Search, Download } from 'lucide-react'
-import { getAuditLogs } from '../../api/index.js'
+import { useState, useEffect, useRef, useCallback, useId } from 'react'
+import { Search, Download, X, ChevronDown, Check, Loader2, Filter, Calendar } from 'lucide-react'
+import { getAuditLogs, getAuditLogOptions } from '../../api/index.js'
 
-// ── Chinese translations ──
-const actionLabel = {
+// ── Constants ──
+
+const ACTION_LABEL = {
   login: '登录', logout: '登出', upload: '上传文件', download: '下载文件',
-  preview: '预览文件', delete: '删除文件', rename: '重命名文件', move: '移动文件',
-  copy: '拷贝文件', create_user: '创建用户', update_user: '编辑用户',
+  preview: '预览文件', delete: '删除文件', restore: '恢复文件',
+  permanent_delete: '永久删除', empty_recycle_bin: '清空回收站',
+  rename: '重命名文件', move: '移动文件',
+  copy: '拷贝文件', copy_to_local: '下载到本地',
+  create_user: '创建用户', update_user: '编辑用户',
   delete_user: '禁用用户', set_permissions: '权限变更', reset_password: '密码重置',
   create_directory: '创建目录', delete_directory: '删除目录',
   change_password: '修改密码', update_profile: '编辑个人信息',
 }
-const moduleLabel = {
+
+const MODULE_LABEL = {
   auth: '登录认证', user: '用户管理', file: '文件管理',
   copy: '文件拷贝', config: '系统配置', system: '系统',
 }
-function t(obj, key) { return obj[key] || key }
 
-const actionColors = {
+const ACTION_COLORS = {
   login: 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400',
   logout: 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400',
   upload: 'bg-green-50 text-green-600 dark:bg-green-900/30 dark:text-green-400',
   download: 'bg-green-50 text-green-600 dark:bg-green-900/30 dark:text-green-400',
   preview: 'bg-[var(--color-primary-light)] text-[var(--color-primary)]',
   delete: 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400',
+  restore: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400',
+  permanent_delete: 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400',
+  empty_recycle_bin: 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400',
   rename: 'bg-sky-50 text-sky-600 dark:bg-sky-900/30 dark:text-sky-400',
   move: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400',
   copy: 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400',
+  copy_to_local: 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400',
   create_user: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400',
   update_user: 'bg-teal-50 text-teal-600 dark:bg-teal-900/30 dark:text-teal-400',
+  update_profile: 'bg-teal-50 text-teal-600 dark:bg-teal-900/30 dark:text-teal-400',
+  delete_user: 'bg-rose-50 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400',
   set_permissions: 'bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400',
   reset_password: 'bg-orange-50 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400',
+  change_password: 'bg-orange-50 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400',
   create_directory: 'bg-cyan-50 text-cyan-600 dark:bg-cyan-900/30 dark:text-cyan-400',
   delete_directory: 'bg-rose-50 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400',
 }
+
+const TABS = [
+  { key: '', label: '全部日志' },
+  { key: 'file', label: '文件操作' },
+  { key: 'user', label: '账号操作' },
+  { key: 'copy', label: '文件拷贝' },
+  { key: 'auth', label: '登录日志' },
+]
+
+const EMPTY_FILTERS = {
+  account: '', username: '', action: '', ip: '', startTime: '', endTime: '',
+}
+
+const PER_PAGE = 20
+
+function fmt(obj, key) { return obj[key] || key }
 
 function fmtTime(iso) {
   if (!iso) return '-'
   return new Date(iso).toLocaleString('zh-CN', { hour12: false })
 }
 
+// ── FilterDropdown ──
+
+function FilterDropdown({ label, options, value, onChange, formatOption, customContent, icon: Icon = Filter }) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const wrapperRef = useRef(null)
+  const popupRef = useRef(null)
+  const btnRef = useRef(null)
+  const searchRef = useRef(null)
+  const uid = useId()
+
+  useEffect(() => {
+    if (!open) return
+    const handler = e => {
+      const t = e.target
+      if (wrapperRef.current?.contains(t) || popupRef.current?.contains(t)) return
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  useEffect(() => {
+    if (open) setTimeout(() => searchRef.current?.focus(), 0)
+    else setSearch('')
+  }, [open])
+
+  const filtered = search && options
+    ? options.filter(o => {
+        const text = (formatOption ? formatOption(o) : o).toLowerCase()
+        return text.includes(search.toLowerCase())
+      })
+    : (options || [])
+
+  const btnRect = btnRef.current?.getBoundingClientRect()
+  const style = btnRect ? {
+    position: 'fixed',
+    top: btnRect.bottom + 8,
+    left: Math.max(8, Math.min(btnRect.left, window.innerWidth - (customContent ? 280 : 224))),
+    width: customContent ? 'auto' : Math.max(btnRect.width + 60, 200),
+    zIndex: 50,
+  } : {}
+
+  const isActive = !!value
+
+  return (
+    <div ref={wrapperRef} className="relative inline-flex items-center">
+      <div
+        ref={btnRef}
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen(!open)}
+        className="group flex items-center gap-1.5 cursor-pointer select-none transition-colors"
+      >
+        <span className={`text-xs font-medium uppercase tracking-wider transition-colors ${isActive ? 'text-[var(--color-primary)]' : 'text-[var(--color-text-subtle)] group-hover:text-[var(--color-text)]'}`}>
+          {label}
+        </span>
+        <div className={`p-1 rounded-md transition-colors ${isActive || open ? 'bg-[var(--color-primary-light)] text-[var(--color-primary)]' : 'text-[var(--color-text-muted)] group-hover:bg-[var(--color-primary-light)] group-hover:text-[var(--color-primary)]'}`}>
+          <Icon size={14} />
+        </div>
+      </div>
+
+      {open && (
+        <div ref={popupRef} style={style}
+          className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl shadow-xl overflow-hidden animate-slide-in">
+          {customContent ? (
+            customContent
+          ) : (
+            <>
+              <div className="p-2 border-b border-[var(--color-border)] bg-[var(--color-bg)]/50">
+                <div className="relative">
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-subtle)]" />
+                  <input
+                    ref={searchRef}
+                    type="text"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    placeholder="搜索..."
+                    className="w-full pl-8 pr-3 py-1.5 text-sm bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg text-[var(--color-text)] placeholder-[var(--color-text-subtle)] focus:outline-none focus:border-[var(--color-primary)] transition-colors"
+                    onKeyDown={e => { if (e.key === 'Escape') setOpen(false) }}
+                  />
+                </div>
+              </div>
+              <ul role="listbox" className="max-h-[240px] overflow-y-auto py-1.5 font-normal normal-case">
+                <li
+                  role="option"
+                  aria-selected={!value}
+                  onClick={() => { onChange(''); setOpen(false) }}
+                  className="px-4 py-2.5 text-sm cursor-pointer hover:bg-[var(--color-primary-light)] text-[var(--color-text-subtle)] transition-colors"
+                >
+                  全部
+                </li>
+                {filtered.map(opt => (
+                  <li
+                    key={opt}
+                    role="option"
+                    aria-selected={value === opt}
+                    onClick={() => { onChange(opt); setOpen(false) }}
+                    className={`px-4 py-2.5 text-sm cursor-pointer hover:bg-[var(--color-primary-light)] flex items-center justify-between transition-colors ${
+                      value === opt ? 'text-[var(--color-primary)] font-medium bg-[var(--color-primary-light)]/40' : 'text-[var(--color-text)]'
+                    }`}>
+                    <span className="truncate pr-4">{formatOption ? formatOption(opt) : opt}</span>
+                    {value === opt && <Check size={14} className="shrink-0 text-[var(--color-primary)]" />}
+                  </li>
+                ))}
+                {filtered.length === 0 && (
+                  <li className="px-4 py-6 text-sm text-[var(--color-text-subtle)] text-center">无匹配项</li>
+                )}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Pagination ──
+
+function Pagination({ page, pages, total, loading, onPageChange }) {
+  return (
+    <div className="px-5 py-3 border-t border-[var(--color-border)] flex items-center justify-between text-sm text-[var(--color-text-subtle)]">
+      <span><span>共 {total} 条日志（永久留存，不可删除）</span>{loading && <span> · 加载中...</span>}</span>
+      <div className="flex items-center gap-2">
+        <button onClick={() => onPageChange(page - 1)} disabled={page <= 1}
+          className="px-3 py-1 rounded border border-[var(--color-border)] hover:bg-[var(--color-primary-light)] text-xs cursor-pointer disabled:opacity-40">
+          上一页
+        </button>
+        <span className="text-xs px-2">{page} / {pages || 1}</span>
+        <button onClick={() => onPageChange(page + 1)} disabled={page >= pages}
+          className="px-3 py-1 rounded border border-[var(--color-border)] hover:bg-[var(--color-primary-light)] text-xs cursor-pointer disabled:opacity-40">
+          下一页
+        </button>
+        <span className="flex items-center gap-1 ml-2" style={{ display: pages > 1 ? 'flex' : 'none' }}>
+          <input type="number" min={1} max={pages} placeholder="页码"
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                const v = parseInt(e.target.value)
+                if (v >= 1 && v <= pages) { onPageChange(v); e.target.value = '' }
+              }
+            }}
+            className="w-14 px-2 py-1 text-xs bg-[var(--color-bg)] border border-[var(--color-border)] rounded text-center focus:outline-none focus:border-[var(--color-primary)]" />
+          <button onClick={e => {
+            const inp = e.target.previousElementSibling
+            const v = parseInt(inp.value)
+            if (v >= 1 && v <= pages) { onPageChange(v); inp.value = '' }
+          }} className="px-2 py-1 rounded border border-[var(--color-border)] hover:bg-[var(--color-primary-light)] text-xs cursor-pointer">
+            跳转
+          </button>
+        </span>
+      </div>
+    </div>
+  )
+}
+
+// ── Main ──
+
 export default function AuditLog() {
   const [logs, setLogs] = useState([])
   const [total, setTotal] = useState(0)
   const [pages, setPages] = useState(0)
-  const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [module, setModule] = useState('')
+  const [search, setSearch] = useState('')
+  const [hideDeleted, setHideDeleted] = useState(true)
+  const [filters, setFilters] = useState(EMPTY_FILTERS)
+  const [options, setOptions] = useState({ accounts: [], usernames: [], actions: [], modules: [], ips: [] })
 
-  const fetchLogs = async () => {
-    setLoading(true); setError('')
-    try {
-      const params = { page, per_page: 20 }
-      if (search) params.user_account = search
-      if (module) params.module = module
-      const data = await getAuditLogs(params)
-      setLogs(data.items || [])
-      setTotal(data.total || 0)
-      setPages(data.pages || 0)
-    } catch (err) { setError(err.message) }
-    finally { setLoading(false) }
-  }
+  const fetchIdRef = useRef(0)
 
-  useEffect(() => { fetchLogs() }, [page, module])
+  const setFilter = useCallback((key, value) => {
+    setFilters(prev => ({ ...prev, [key]: value }))
+    setPage(1)
+  }, [])
 
-  const handleSearch = (e) => { e.preventDefault(); setPage(1); fetchLogs() }
+  const clearFilters = useCallback(() => {
+    setFilters(EMPTY_FILTERS)
+    setPage(1)
+  }, [])
+
+  const hasActiveFilters = Object.values(filters).some(Boolean)
+
+  useEffect(() => {
+    getAuditLogOptions({ hide_deleted: hideDeleted ? '1' : '0' })
+      .then(setOptions)
+      .catch(() => {})
+  }, [hideDeleted])
+
+  useEffect(() => {
+    const currentId = ++fetchIdRef.current
+    setLoading(true)
+    setError('')
+
+    const params = { page, per_page: PER_PAGE }
+    if (search) params.user_account = search
+    if (module) params.module = module
+    if (filters.account) params.user_account = filters.account
+    if (filters.username) params.username = filters.username
+    if (filters.action) params.action = filters.action
+    if (filters.ip) params.ip = filters.ip
+    if (filters.startTime) params.start_date = filters.startTime
+    if (filters.endTime) params.end_date = filters.endTime
+    if (hideDeleted) params.hide_deleted = '1'
+
+    getAuditLogs(params)
+      .then(data => {
+        if (fetchIdRef.current !== currentId) return
+        setLogs(data.items || [])
+        setTotal(data.total || 0)
+        setPages(data.pages || 0)
+      })
+      .catch(err => {
+        if (fetchIdRef.current !== currentId) return
+        setError(err.message)
+      })
+      .finally(() => {
+        if (fetchIdRef.current !== currentId) return
+        setLoading(false)
+      })
+  }, [page, module, search, filters, hideDeleted])
+
+  const handleSearch = e => { e.preventDefault(); setPage(1) }
 
   const handleExport = async () => {
     try {
-      // Fetch all logs matching current filters (up to 10000)
       const params = { page: 1, per_page: 10000 }
       if (search) params.user_account = search
       if (module) params.module = module
+      if (filters.account) params.user_account = filters.account
+      if (filters.username) params.username = filters.username
+      if (filters.action) params.action = filters.action
+      if (filters.ip) params.ip = filters.ip
+      if (filters.startTime) params.start_date = filters.startTime
+      if (filters.endTime) params.end_date = filters.endTime
+      if (hideDeleted) params.hide_deleted = '1'
+
       const data = await getAuditLogs(params)
       const items = data.items || []
       if (items.length === 0) { alert('没有可导出的日志'); return }
 
-      // Build CSV
       const header = ['登录账号', '姓名', '操作', '模块', '详情', 'IP', '时间']
       const rows = items.map(log => [
-        log.account || '',
-        log.username || '',
-        t(actionLabel, log.action),
-        t(moduleLabel, log.module),
+        log.account || '', log.username || '',
+        fmt(ACTION_LABEL, log.action), fmt(MODULE_LABEL, log.module),
         (log.detail || '').replace(/"/g, '""'),
-        log.ip || '',
-        fmtTime(log.created_at),
+        log.ip || '', fmtTime(log.created_at),
       ])
       const csv = '﻿' + [header, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n')
 
-      // Trigger download
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `审计日志_${new Date().toISOString().slice(0,10)}.csv`
+      a.download = `审计日志_${new Date().toISOString().slice(0, 10)}.csv`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
@@ -104,97 +330,172 @@ export default function AuditLog() {
     } catch (err) { alert('导出失败: ' + err.message) }
   }
 
-  const tabs = [
-    { key: '', label: '全部日志' }, { key: 'file', label: '文件操作' },
-    { key: 'user', label: '账号操作' }, { key: 'copy', label: '文件拷贝' }, { key: 'auth', label: '登录日志' },
-  ]
-
+  // ── Style tokens ──
   const card = "bg-[var(--color-surface)] rounded-xl border border-[var(--color-border)] overflow-hidden"
-  const th = "text-left px-4 py-3 text-xs font-medium text-[var(--color-text-subtle)] uppercase tracking-wider"
-  const td = "px-4 py-2.5"
-  const input = "w-full pl-10 pr-4 py-2.5 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg text-sm text-[var(--color-text)] placeholder-[var(--color-text-subtle)] focus:outline-none focus:border-[var(--color-primary)]"
+  const th = "text-left px-5 py-2.5 text-xs font-medium text-[var(--color-text-subtle)] uppercase tracking-wider"
+  const td = "px-5 py-2.5"
+  const inputCls = "w-full pl-10 pr-4 py-2.5 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg text-sm text-[var(--color-text)] placeholder-[var(--color-text-subtle)] focus:outline-none focus:border-[var(--color-primary)]"
 
   return (
     <div className="space-y-6">
+      {/* ── Header ── */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-[var(--color-text)]">审计日志</h1>
           <p className="text-sm text-[var(--color-text-subtle)] mt-1">全维度操作审计，日志不可篡改</p>
         </div>
-        <button onClick={handleExport} className="flex items-center gap-2 px-4 py-2.5 bg-[var(--color-surface)] border border-[var(--color-border)] hover:bg-[var(--color-primary-light)] text-[var(--color-text-muted)] text-sm font-medium rounded-lg cursor-pointer">
-          <Download size={16} /> 导出日志
-        </button>
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={() => { setHideDeleted(!hideDeleted); setPage(1) }}
+            className={`group flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-full border-2 cursor-pointer transition-all duration-200 ${
+              hideDeleted
+                ? 'bg-[var(--color-primary)] border-[var(--color-primary)] text-white shadow-sm hover:bg-[var(--color-primary-hover)]'
+                : 'bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]'
+            }`}>
+            <span className={`relative w-8 h-[18px] rounded-full transition-colors duration-200 ${
+              hideDeleted ? 'bg-white/30' : 'bg-[var(--color-border)]'
+            }`}>
+              <span className={`absolute top-[2px] w-[14px] h-[14px] rounded-full shadow-sm transition-all duration-200 ${
+                hideDeleted
+                  ? 'left-[16px] bg-white'
+                  : 'left-[2px] bg-[var(--color-text-subtle)]'
+              }`} />
+            </span>
+            <span>{hideDeleted ? '隐藏已删除账户' : '显示全部账户'}</span>
+          </button>
+          <button onClick={handleExport}
+            className="flex items-center gap-2 px-4 py-2.5 bg-[var(--color-surface)] border border-[var(--color-border)] hover:bg-[var(--color-primary-light)] text-[var(--color-text-muted)] text-sm font-medium rounded-lg cursor-pointer">
+            <Download size={16} /> 导出日志
+          </button>
+        </div>
       </div>
 
+      {/* ── Tabs ── */}
       <div className="flex items-center gap-1 bg-[var(--color-surface)] rounded-lg border border-[var(--color-border)] p-1 w-fit flex-wrap">
-        {tabs.map(tab => (
+        {TABS.map(tab => (
           <button key={tab.key} onClick={() => { setModule(tab.key); setPage(1) }}
-            className={`px-4 py-2 text-sm font-medium rounded-md cursor-pointer ${module === tab.key ? 'bg-[var(--color-primary)] text-white shadow-sm' : 'text-[var(--color-text-muted)] hover:bg-[var(--color-primary-light)]'}`}>
+            className={`px-4 py-2 text-sm font-medium rounded-md cursor-pointer transition-colors ${
+              module === tab.key
+                ? 'bg-[var(--color-primary)] text-white shadow-sm'
+                : 'text-[var(--color-text-muted)] hover:bg-[var(--color-primary-light)]'
+            }`}>
             {tab.label}
           </button>
         ))}
       </div>
 
+      {/* ── Search bar ── */}
       <form onSubmit={handleSearch} className="flex items-center gap-3">
         <div className="relative flex-1 max-w-md">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-subtle)]" />
-          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索操作人..." className={input} />
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="搜索操作人..." className={inputCls} />
         </div>
-        <button type="submit" className="px-4 py-2.5 bg-[var(--color-surface)] border border-[var(--color-border)] hover:bg-[var(--color-primary-light)] text-[var(--color-text-muted)] text-sm rounded-lg cursor-pointer">搜索</button>
+        <button type="submit"
+          className="px-4 py-2.5 bg-[var(--color-surface)] border border-[var(--color-border)] hover:bg-[var(--color-primary-light)] text-[var(--color-text-muted)] text-sm rounded-lg cursor-pointer">
+          搜索
+        </button>
+        {hasActiveFilters && (
+          <button onClick={clearFilters} type="button"
+            className="flex items-center gap-1 px-3 py-2.5 text-xs text-[var(--color-primary)] hover:bg-[var(--color-primary-light)] rounded-lg cursor-pointer transition-colors">
+            <X size={14} /> 清除筛选
+          </button>
+        )}
       </form>
 
-      {error && <div className="bg-[var(--color-danger-light)] border border-red-300 dark:border-red-800 text-[var(--color-danger)] text-sm rounded-lg px-4 py-2.5">{error}</div>}
+      {/* ── Error ── */}
+      {error && (
+        <div className="bg-[var(--color-danger-light)] border border-red-300 dark:border-red-800 text-[var(--color-danger)] text-sm rounded-lg px-4 py-2.5">
+          {error}
+        </div>
+      )}
 
+      {/* ── Table with integrated filters ── */}
       <div className={card}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-[var(--color-bg)]/50">
-                <th className={th}>登录账号</th><th className={th}>姓名</th><th className={th}>操作</th><th className={th}>模块</th>
-                <th className={th}>详情</th><th className={th}>IP</th><th className={th}>时间</th>
+              <tr className="bg-[var(--color-bg)]/50 border-b border-[var(--color-border)]">
+                <th className="text-left px-5 py-3 whitespace-nowrap">
+                  <FilterDropdown label="登录账号" options={options.accounts} value={filters.account} onChange={v => setFilter('account', v)} />
+                </th>
+                <th className="text-left px-5 py-3 whitespace-nowrap">
+                  <FilterDropdown label="姓名" options={options.usernames} value={filters.username} onChange={v => setFilter('username', v)} />
+                </th>
+                <th className="text-left px-5 py-3 whitespace-nowrap">
+                  <FilterDropdown label="操作" options={options.actions} value={filters.action} onChange={v => setFilter('action', v)} formatOption={v => fmt(ACTION_LABEL, v)} />
+                </th>
+                <th className="text-left px-5 py-3 whitespace-nowrap">
+                  <FilterDropdown label="模块" options={options.modules} value={module} onChange={v => { setModule(v); setPage(1) }} formatOption={v => fmt(MODULE_LABEL, v)} />
+                </th>
+                <th className="text-left px-5 py-3 text-xs font-medium text-[var(--color-text-subtle)] uppercase tracking-wider whitespace-nowrap">
+                  详情
+                </th>
+                <th className="text-left px-5 py-3 whitespace-nowrap">
+                  <FilterDropdown label="IP" options={options.ips} value={filters.ip} onChange={v => setFilter('ip', v)} />
+                </th>
+                <th className="text-left px-5 py-3 whitespace-nowrap">
+                  <FilterDropdown 
+                    label="时间" 
+                    icon={Calendar}
+                    value={filters.startTime || filters.endTime} 
+                    customContent={
+                      <div className="p-4 flex flex-col gap-4 min-w-[260px] font-normal normal-case">
+                        <div className="flex flex-col gap-2">
+                          <label className="text-sm font-medium text-[var(--color-text)]">起始时间</label>
+                          <input type="datetime-local" value={filters.startTime} onChange={e => setFilter('startTime', e.target.value)} className={inputCls} style={{ paddingLeft: '1rem' }} />
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <label className="text-sm font-medium text-[var(--color-text)]">结束时间</label>
+                          <input type="datetime-local" value={filters.endTime} onChange={e => setFilter('endTime', e.target.value)} className={inputCls} style={{ paddingLeft: '1rem' }} />
+                        </div>
+                        <div className="flex justify-end pt-2 mt-2 border-t border-[var(--color-border)]">
+                          <button type="button" onClick={() => { setFilter('startTime', ''); setFilter('endTime', '') }} className="text-xs text-[var(--color-text-subtle)] hover:text-[var(--color-danger)] transition-colors px-2 py-1 rounded-md hover:bg-[var(--color-danger-light)] cursor-pointer">
+                            清除时间筛选
+                          </button>
+                        </div>
+                      </div>
+                    } 
+                  />
+                </th>
               </tr>
             </thead>
             <tbody>
-              {logs.map(log => (
-                <tr key={log.id} className="border-t border-[var(--color-border)] hover:bg-[var(--color-primary-light)]">
-                  <td className={`${td} font-mono text-xs text-[var(--color-text-muted)]`}>{log.account}</td>
-                  <td className={`${td} text-[var(--color-text)] font-medium whitespace-nowrap`}>{log.username}</td>
-                  <td className={td}>
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap ${actionColors[log.action] || 'bg-[var(--color-primary-light)] text-[var(--color-primary)]'}`}>
-                      {t(actionLabel, log.action)}
-                    </span>
+              {loading ? (
+                <tr>
+                  <td colSpan={7} className="px-5 py-12 text-center">
+                    <Loader2 size={20} className="animate-spin mx-auto text-[var(--color-primary)]" />
+                    <span className="text-xs text-[var(--color-text-subtle)] mt-2 block">加载中...</span>
                   </td>
-                  <td className={`${td} text-[var(--color-text-subtle)] text-xs whitespace-nowrap`}>{t(moduleLabel, log.module)}</td>
-                  <td className={`${td} text-[var(--color-text-muted)] text-xs max-w-[280px]`}>
-                    <span title={log.detail || ''} className="line-clamp-2 cursor-default">{log.detail || '-'}</span>
-                  </td>
-                  <td className={`${td} font-mono text-xs text-[var(--color-text-subtle)] whitespace-nowrap`}>{log.ip}</td>
-                  <td className={`${td} font-mono text-xs text-[var(--color-text-subtle)] whitespace-nowrap`}>{fmtTime(log.created_at)}</td>
                 </tr>
-              ))}
-              {!loading && logs.length === 0 && (
-                <tr><td colSpan={7} className="px-5 py-8 text-center text-[var(--color-text-subtle)] text-sm">暂无日志记录</td></tr>
+              ) : logs.length > 0 ? (
+                logs.map(log => (
+                  <tr key={log.id} className="border-t border-[var(--color-border)] hover:bg-[var(--color-primary-light)] transition-colors">
+                    <td className={`${td} font-mono text-xs text-[var(--color-text-muted)]`}>{log.account}</td>
+                    <td className={`${td} text-[var(--color-text)] font-medium whitespace-nowrap`}>{log.username}</td>
+                    <td className={td}>
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium whitespace-nowrap ${ACTION_COLORS[log.action] || 'bg-[var(--color-primary-light)] text-[var(--color-primary)]'}`}>
+                        {fmt(ACTION_LABEL, log.action)}
+                      </span>
+                    </td>
+                    <td className={`${td} text-[var(--color-text-subtle)] text-xs whitespace-nowrap`}>{fmt(MODULE_LABEL, log.module)}</td>
+                    <td className={`${td} text-[var(--color-text-muted)] text-xs max-w-[280px]`}>
+                      <span title={log.detail || ''} className="line-clamp-2 cursor-default">{log.detail || '-'}</span>
+                    </td>
+                    <td className={`${td} font-mono text-xs text-[var(--color-text-subtle)] whitespace-nowrap`}>{log.ip}</td>
+                    <td className={`${td} font-mono text-xs text-[var(--color-text-subtle)] whitespace-nowrap`}>{fmtTime(log.created_at)}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={7} className="px-5 py-12 text-center text-[var(--color-text-subtle)] text-sm">
+                    暂无日志记录
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
         </div>
-        <div className="px-5 py-3 border-t border-[var(--color-border)] flex items-center justify-between text-sm text-[var(--color-text-subtle)]">
-          <span>共 {total} 条日志（永久留存，不可删除）{loading && ' · 加载中...'}</span>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page <= 1} className="px-3 py-1 rounded border border-[var(--color-border)] hover:bg-[var(--color-primary-light)] text-xs cursor-pointer disabled:opacity-40">上一页</button>
-            <span className="text-xs px-2">{page} / {pages || 1}</span>
-            <button onClick={() => setPage(p => p+1)} disabled={page >= pages} className="px-3 py-1 rounded border border-[var(--color-border)] hover:bg-[var(--color-primary-light)] text-xs cursor-pointer disabled:opacity-40">下一页</button>
-            {pages > 1 && (
-              <span className="flex items-center gap-1 ml-2">
-                <input type="number" min={1} max={pages} placeholder="页码"
-                  onKeyDown={e => { if (e.key === 'Enter') { const v = parseInt(e.target.value); if (v >= 1 && v <= pages) { setPage(v); e.target.value = '' } }}}
-                  className="w-14 px-2 py-1 text-xs bg-[var(--color-bg)] border border-[var(--color-border)] rounded text-center focus:outline-none focus:border-[var(--color-primary)]" />
-                <button onClick={e => { const inp = e.target.previousElementSibling; const v = parseInt(inp.value); if (v >= 1 && v <= pages) { setPage(v); inp.value = '' }}}
-                  className="px-2 py-1 rounded border border-[var(--color-border)] hover:bg-[var(--color-primary-light)] text-xs cursor-pointer">跳转</button>
-              </span>
-            )}
-          </div>
-        </div>
+        <Pagination page={page} pages={pages} total={total} loading={loading} onPageChange={setPage} />
       </div>
     </div>
   )

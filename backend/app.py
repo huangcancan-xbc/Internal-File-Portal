@@ -2,9 +2,10 @@ import os
 import sys
 from flask import Flask, jsonify
 from flask_jwt_extended import JWTManager
+from sqlalchemy import inspect
 from config import Config
 from models import db
-from models.user import User, UserPermission, ROLE_ADMIN, ROLE_USER, PERM_ALL, PERM_VIEW, PERM_UPLOAD, PERM_DOWNLOAD
+from models.user import User, UserPermission, ROLE_ADMIN, PERM_ALL
 from services.file_service import init_root_directories
 
 
@@ -66,6 +67,7 @@ def create_app(config_class=Config):
 
     with app.app_context():
         db.create_all()
+        _ensure_schema()
         _seed_data(app)
 
     return app
@@ -92,6 +94,18 @@ def _seed_data(app):
         print('[INIT] 管理员已创建: admin / admin123')
 
     init_root_directories()
+
+
+def _ensure_schema():
+    """Apply lightweight additive schema fixes for deployments without migrations."""
+    inspector = inspect(db.engine)
+    if 'users' not in inspector.get_table_names():
+        return
+
+    user_columns = {column['name'] for column in inspector.get_columns('users')}
+    if 'serial_number' not in user_columns:
+        db.session.execute(db.text('ALTER TABLE users ADD COLUMN serial_number VARCHAR(128) NULL'))
+        db.session.commit()
 
 
 if __name__ == '__main__':

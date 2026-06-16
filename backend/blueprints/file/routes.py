@@ -94,6 +94,50 @@ def delete_file(file_id):
 
 # ── Recycle Bin ──
 
+@file_bp.route('/batch/delete', methods=['POST'])
+@jwt_required()
+def batch_delete_files():
+    user, err = _user_or_404()
+    if err: return err
+    data = request.get_json() or {}
+    success, result = file_service.batch_delete_files(user, data.get('file_ids'))
+    if not success:
+        return jsonify({'error': result}), 400
+    return jsonify({'message': f'成功 {result["success_count"]} 个，失败 {result["fail_count"]} 个', 'data': result}), 200
+
+
+@file_bp.route('/batch/move', methods=['POST'])
+@jwt_required()
+def batch_move_files():
+    user, err = _user_or_404()
+    if err: return err
+    data = request.get_json() or {}
+    file_ids = data.get('file_ids')
+    target_directory_id = data.get('target_directory_id')
+    if target_directory_id == '':
+        target_directory_id = None
+    success, result = file_service.batch_move_files(user, file_ids, target_directory_id)
+    if not success:
+        return jsonify({'error': result}), 400
+    return jsonify({'message': f'成功 {result["success_count"]} 个，失败 {result["fail_count"]} 个', 'data': result}), 200
+
+
+@file_bp.route('/batch/copy', methods=['POST'])
+@jwt_required()
+def batch_copy_files():
+    user, err = _user_or_404()
+    if err: return err
+    data = request.get_json() or {}
+    success, result = file_service.batch_copy_files(
+        user, data.get('file_ids'),
+        target_directory_id=data.get('target_directory_id'),
+        copy_type=data.get('copy_type', 'internal'),
+    )
+    if not success:
+        return jsonify({'error': result}), 400
+    return jsonify({'message': f'成功 {result["success_count"]} 个，失败 {result["fail_count"]} 个', 'data': result}), 200
+
+
 @file_bp.route('/recycle-bin', methods=['GET'])
 @jwt_required()
 def list_recycle_bin():
@@ -161,8 +205,8 @@ def move_file(file_id):
     if err: return err
     data = request.get_json()
     target_dir = data.get('target_directory_id') if data else None
-    if target_dir is None:
-        return jsonify({'error': '目标目录不能为空'}), 400
+    if target_dir == '':
+        target_dir = None
     success, result = file_service.move_file(user, file_id, target_dir)
     if not success:
         return jsonify({'error': result}), 400

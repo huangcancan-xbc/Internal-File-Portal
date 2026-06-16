@@ -10,7 +10,8 @@ class Config:
 
     # Database
     SQLALCHEMY_DATABASE_URI = os.environ.get(
-        'DATABASE_URL', f'sqlite:///{os.path.join(BASE_DIR, "app.db")}'
+        'DATABASE_URL',
+        'mysql+pymysql://root:123456@localhost:3306/file_control?charset=utf8mb4'
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 

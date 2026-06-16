@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { UserPlus, Search, Key, Ban, Pencil, X, Save, Trash2 } from 'lucide-react'
 import { getUsers, createUser, updateUser, resetPassword } from '../../api/index.js'
 
@@ -25,11 +25,15 @@ export default function UserManagement() {
   const [editForm, setEditForm] = useState({ account: '', username: '', department: '', role: 'user' })
   const [createForm, setCreateForm] = useState({ account: '', username: '', password: '', department: '开发', role: 'user' })
 
+  const searchRef = useRef(search)
+  searchRef.current = search
+
   const fetchUsers = async () => {
     setLoading(true); setError('')
     try {
       const params = { page, per_page: 20 }
-      if (search) params.keyword = search
+      const kw = searchRef.current
+      if (kw) params.keyword = kw
       const data = await getUsers(params)
       setUsers(data.items || [])
       setTotal(data.total || 0)
@@ -38,7 +42,23 @@ export default function UserManagement() {
     finally { setLoading(false) }
   }
 
-  useEffect(() => { fetchUsers() }, [page])
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true); setError('')
+    const params = { page, per_page: 20 }
+    const kw = searchRef.current
+    if (kw) params.keyword = kw
+    getUsers(params)
+      .then(data => {
+        if (cancelled) return
+        setUsers(data.items || [])
+        setTotal(data.total || 0)
+        setPages(data.pages || 0)
+      })
+      .catch(err => { if (!cancelled) setError(err.message) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [page])
 
   const handleSearch = (e) => { e.preventDefault(); setPage(1); fetchUsers() }
 
@@ -96,8 +116,8 @@ export default function UserManagement() {
   }
 
   const card = "bg-[var(--color-surface)] rounded-xl border border-[var(--color-border)] overflow-hidden"
-  const th = "text-left px-4 py-3 text-xs font-medium text-[var(--color-text-subtle)] uppercase tracking-wider"
-  const td = "px-4 py-2.5"
+  const th = "text-left px-5 py-3 text-xs font-medium text-[var(--color-text-subtle)] uppercase tracking-wider"
+  const td = "px-5 py-2.5"
   const input = "w-full pl-10 pr-4 py-2.5 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg text-sm text-[var(--color-text)] placeholder-[var(--color-text-subtle)] focus:outline-none focus:border-[var(--color-primary)]"
   const btnIcon = "p-1.5 rounded hover:bg-[var(--color-primary-light)] text-[var(--color-text-muted)] cursor-pointer"
   const modalInput = "w-full px-3 py-2 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg text-sm text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
@@ -136,17 +156,18 @@ export default function UserManagement() {
               </tr>
             </thead>
             <tbody>
-              {users.map(user => (
-                <tr key={user.id} className="border-t border-[var(--color-border)] hover:bg-[var(--color-primary-light)]">
-                  <td className={`${td} text-[var(--color-text)] font-bold text-sm`}>{user.username}</td>
-                  <td className={`${td} font-mono text-xs text-[var(--color-text-muted)]`}>{user.account}</td>
-                  <td className={`${td} text-[var(--color-text-muted)] text-xs`}>{user.department || '-'}</td>
-                  <td className={td}>
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${user.role === 'admin' ? 'bg-[var(--color-primary-light)] text-[var(--color-primary)]' : 'bg-[var(--color-border)] text-[var(--color-text-muted)]'}`}>
-                      {user.role === 'admin' ? '管理员' : '普通用户'}
-                    </span>
-                  </td>
-                  <td className={td}>
+              {users.length > 0 ? (
+                users.map(user => (
+                  <tr key={user.id} className="border-t border-[var(--color-border)] hover:bg-[var(--color-primary-light)]">
+                    <td className={`${td} text-[var(--color-text)] font-bold text-sm`}>{user.username}</td>
+                    <td className={`${td} font-mono text-xs text-[var(--color-text-muted)]`}>{user.account}</td>
+                    <td className={`${td} text-[var(--color-text-muted)] text-xs`}>{user.department || '-'}</td>
+                    <td className={td}>
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${user.role === 'admin' ? 'bg-[var(--color-primary-light)] text-[var(--color-primary)]' : 'bg-[var(--color-border)] text-[var(--color-text-muted)]'}`}>
+                        {user.role === 'admin' ? '管理员' : '普通用户'}
+                      </span>
+                    </td>
+                    <td className={td}>
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${user.status === 'active' ? 'bg-[var(--color-success-light)] text-[var(--color-success)]' : 'bg-[var(--color-danger-light)] text-[var(--color-danger)]'}`}>
                       {user.status === 'active' ? '启用' : '禁用'}
                     </span>
@@ -164,15 +185,15 @@ export default function UserManagement() {
                     </div>
                   </td>
                 </tr>
-              ))}
-              {!loading && users.length === 0 && (
-                <tr><td colSpan={6} className="px-5 py-8 text-center text-[var(--color-text-subtle)] text-sm">暂无用户</td></tr>
-              )}
+                ))
+                ) : !loading ? (
+                  <tr key="__users_empty__"><td colSpan={6} className="px-5 py-8 text-center text-[var(--color-text-subtle)] text-sm">暂无用户</td></tr>
+                ) : null}
             </tbody>
           </table>
         </div>
         <div className="px-5 py-3 border-t border-[var(--color-border)] flex items-center justify-between text-sm text-[var(--color-text-subtle)]">
-          <span>共 {total} 个用户 {loading && '· 加载中...'}</span>
+          <span><span>共 {total} 个用户</span>{loading && <span>· 加载中...</span>}</span>
           <div className="flex items-center gap-2">
             <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page <= 1} className="px-3 py-1 rounded border border-[var(--color-border)] hover:bg-[var(--color-primary-light)] text-xs cursor-pointer disabled:opacity-40">上一页</button>
             <span className="text-xs px-2">{page} / {pages || 1}</span>

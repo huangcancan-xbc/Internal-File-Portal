@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   Users, FolderOpen, ScrollText, Shield, TrendingUp,
-  AlertTriangle, Clock, HardDrive
+  Clock, HardDrive, Trash2, RefreshCw
 } from 'lucide-react'
-import { getUsers, getFiles, getAuditLogs } from '../../api/index.js'
+import { getStats, getAuditLogs } from '../../api/index.js'
 
 const actionLabel = {
   login: '登录', logout: '登出', upload: '上传文件', download: '下载文件',
@@ -19,45 +19,66 @@ const moduleLabel = {
 }
 function t(obj, key) { return obj[key] || key }
 
+function formatSize(bytes) {
+  if (!bytes) return '0 B'
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+  return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB'
+}
+
 const iconBg = {
   sky: 'bg-sky-100 text-sky-600 dark:bg-sky-900/40 dark:text-sky-400',
   emerald: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400',
   amber: 'bg-amber-100 text-amber-600 dark:bg-amber-900/40 dark:text-amber-400',
-  red: 'bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-400',
+  purple: 'bg-purple-100 text-purple-600 dark:bg-purple-900/40 dark:text-purple-400',
 }
 
 export default function Dashboard() {
-  const [stats, setStats] = useState({ users: 0, files: 0, totalSize: 0, logs: [] })
+  const [stats, setStats] = useState({ users: 0, activeUsers: 0, files: 0, totalSize: 0, logs: 0, deletedFiles: 0 })
+  const [recentLogs, setRecentLogs] = useState([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const [usersRes, filesRes, logsRes] = await Promise.all([
-          getUsers({ per_page: 1 }),
-          getFiles({ per_page: 1 }),
-          getAuditLogs({ per_page: 5 }),
-        ])
-        setStats({
-          users: usersRes.total || 0,
-          files: filesRes.total || 0,
-          totalSize: filesRes.total_size || 0,
-          logs: logsRes.items || [],
-        })
-      } catch (err) {
-        console.error('Dashboard load failed:', err)
-      } finally {
-        setLoading(false)
-      }
+  const load = useCallback(async () => {
+    try {
+      const [statsRes, logsRes] = await Promise.all([
+        getStats(),
+        getAuditLogs({ per_page: 5 }),
+      ])
+      setStats({
+        users: statsRes.users || 0,
+        activeUsers: statsRes.active_users || 0,
+        files: statsRes.files || 0,
+        totalSize: statsRes.total_size || 0,
+        logs: statsRes.logs || 0,
+        deletedFiles: statsRes.deleted_files || 0,
+      })
+      setRecentLogs(logsRes.items || [])
+    } catch (err) {
+      console.error('Dashboard load failed:', err)
+    } finally {
+      setLoading(false)
     }
-    load()
   }, [])
 
+  useEffect(() => {
+    load()
+  }, [load])
+
+  // Auto-refresh when user returns to this tab/page
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') load()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [load])
+
   const kpiCards = [
-    { label: '用户总数', value: stats.users, icon: Users, color: 'sky', change: '系统用户' },
+    { label: '用户总数', value: stats.users, icon: Users, color: 'sky', change: `活跃 ${stats.activeUsers}` },
     { label: '文件总数', value: stats.files, icon: FolderOpen, color: 'emerald', change: '全部文件' },
-    { label: '今日操作', value: stats.logs.length, icon: TrendingUp, color: 'amber', change: '最近记录' },
-    { label: '告警事件', value: '0', icon: AlertTriangle, color: 'red', change: '暂无' },
+    { label: '操作日志', value: stats.logs, icon: TrendingUp, color: 'amber', change: '累计记录' },
+    { label: '回收站', value: stats.deletedFiles, icon: Trash2, color: 'purple', change: '已删除文件' },
   ]
 
   const cardClass = "bg-[var(--color-surface)] rounded-xl border border-[var(--color-border)] p-5 hover:shadow-md hover:border-[var(--color-border-light)] cursor-pointer"
@@ -66,9 +87,16 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-bold text-[var(--color-text)]">系统概览</h1>
-        <p className="text-sm text-[var(--color-text-subtle)] mt-1">文件全流程管控系统运行状态</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-[var(--color-text)]">系统概览</h1>
+          <p className="text-sm text-[var(--color-text-subtle)] mt-1">文件全流程管控系统运行状态</p>
+        </div>
+        <button onClick={() => { setLoading(true); load() }}
+          className="p-2 rounded-lg hover:bg-[var(--color-primary-light)] text-[var(--color-text-muted)] cursor-pointer"
+          title="刷新数据">
+          <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+        </button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -101,7 +129,8 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {stats.logs.map((log, i) => (
+                {recentLogs.length > 0 ? (
+                  recentLogs.map((log, i) => (
                   <tr key={i} className="border-t border-[var(--color-border)] hover:bg-[var(--color-primary-light)]">
                     <td className={`${tdClass} text-[var(--color-text)] font-medium`}>{log.username || log.account}</td>
                     <td className={tdClass}><span className="px-2 py-0.5 bg-[var(--color-primary-light)] text-[var(--color-primary)] rounded text-xs">{t(actionLabel, log.action)}</span></td>
@@ -111,10 +140,11 @@ export default function Dashboard() {
                     </td>
                     <td className={`${tdClass} text-[var(--color-text-subtle)] font-mono text-xs`}>{log.ip}</td>
                   </tr>
-                ))}
-                {!loading && stats.logs.length === 0 && (
-                  <tr><td colSpan={5} className="px-5 py-8 text-center text-[var(--color-text-subtle)] text-sm">暂无操作记录</td></tr>
-                )}
+                  ))
+                ) : !loading ? (
+                  <tr key="__dashboard_empty__"><td colSpan={5} className="px-5 py-8 text-center text-[var(--color-text-subtle)] text-sm">暂无操作记录</td></tr>
+                ) : null}
+
               </tbody>
             </table>
           </div>
@@ -126,12 +156,12 @@ export default function Dashboard() {
             <div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]"><HardDrive size={16} />文件总大小</div>
-                <span className="text-sm font-bold text-[var(--color-text)]">{loading ? '...' : (stats.totalSize / (1024*1024*1024)).toFixed(2) + ' GB'}</span>
+                <span className="text-sm font-bold text-[var(--color-text)]">{loading ? '...' : formatSize(stats.totalSize)}</span>
               </div>
             </div>
-            <div className="flex items-center justify-between pt-2"><div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]"><Shield size={16} />安全状态</div><span className="text-sm font-medium text-[var(--color-success)]">正常</span></div>
+            <div className="flex items-center justify-between"><div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]"><Users size={16} />活跃用户</div><span className="text-sm font-medium text-[var(--color-text)]">{loading ? '...' : stats.activeUsers} 人</span></div>
+            <div className="flex items-center justify-between"><div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]"><Shield size={16} />安全状态</div><span className="text-sm font-medium text-[var(--color-success)]">正常</span></div>
             <div className="flex items-center justify-between"><div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]"><Clock size={16} />系统运行</div><span className="text-sm font-medium text-[var(--color-text)]">运行中</span></div>
-            <div className="flex items-center justify-between"><div className="flex items-center gap-2 text-sm text-[var(--color-text-muted)]"><AlertTriangle size={16} />待处理告警</div><span className="text-sm font-medium text-[var(--color-text)]">0 条</span></div>
           </div>
         </div>
       </div>

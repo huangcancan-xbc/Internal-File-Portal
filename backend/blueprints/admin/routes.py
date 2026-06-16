@@ -2,7 +2,38 @@ from flask import request, jsonify
 from flask_jwt_extended import jwt_required
 from blueprints.admin import admin_bp
 from utils.permissions import admin_required, get_current_user
+from utils.request import get_client_ip, get_client_ua
 from services import user_service
+from services.user_service import _audit
+from models.user import User
+from models.file import FileRecord
+from models.log import AuditLog
+from models import db
+
+# ── Dashboard Stats ──
+
+@admin_bp.route('/stats', methods=['GET'])
+@jwt_required()
+@admin_required
+def get_stats():
+    """Return aggregated statistics for the dashboard."""
+    users_count = User.query.filter(User.status != 'deleted').count()
+    active_users = User.query.filter_by(status='active').count()
+    files_count = FileRecord.query.filter_by(status='active').count()
+    total_size = db.session.query(
+        db.func.coalesce(db.func.sum(FileRecord.file_size), 0)
+    ).filter_by(status='active').scalar()
+    logs_count = AuditLog.query.count()
+    deleted_files = FileRecord.query.filter_by(status='deleted').count()
+
+    return jsonify({'data': {
+        'users': users_count,
+        'active_users': active_users,
+        'files': files_count,
+        'total_size': total_size,
+        'logs': logs_count,
+        'deleted_files': deleted_files,
+    }}), 200
 
 
 # ── User Management ──
@@ -144,3 +175,56 @@ def update_config():
         description=data.get('description'), user_id=admin.id,
     )
     return jsonify({'message': '配置更新成功', 'data': cfg.to_dict()}), 200
+
+
+# ── Device Management ──
+
+@admin_bp.route('/users/<int:user_id>/device', methods=['GET'])
+@jwt_required()
+@admin_required
+def get_user_device(user_id):
+    """Get user's registered device info."""
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': '用户不存在'}), 404
+    return jsonify({'data': {
+        'serial_number': user.serial_number,
+    }}), 200
+
+
+@admin_bp.route('/users/<int:user_id>/device', methods=['PUT'])
+@jwt_required()
+@admin_required
+def update_user_device(user_id):
+    """Register/update device info for a user."""
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': '用户不存在'}), 404
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': '请求数据为空'}), 400
+    user.serial_number = data.get('serial_number', user.serial_number or '')[:128]
+    db.session.commit()
+    log = AuditLog(
+        user_id=user.id, account=user.account, username=user.username,
+        ip=get_client_ip(), user_agent=get_client_ua(), module='user', action='update_user',
+        detail=f'更新了设备信息（序列号: {user.serial_number}）', status='success',
+    )
+    db.session.add(log)
+    db.session.commit()
+    return jsonify({'message': '设备信息已更新', 'data': {
+        'serial_number': user.serial_number,
+    }}), 200
+
+
+@admin_bp.route('/users/<int:user_id>/device', methods=['DELETE'])
+@jwt_required()
+@admin_required
+def clear_user_device(user_id):
+    """Clear device binding for a user."""
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': '用户不存在'}), 404
+    user.serial_number = None
+    db.session.commit()
+    return jsonify({'message': '设备绑定已清除'}), 200

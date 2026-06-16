@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Upload, Search, Download, Eye, Globe, Folder, ChevronRight, ArrowUp } from 'lucide-react'
 import { getFiles, uploadFiles, downloadFile, getDirectories } from '../../api/index.js'
 import PreviewModal from '../../components/PreviewModal.jsx'
@@ -43,6 +43,9 @@ export default function PublicFiles() {
   const [previewFile, setPreviewFile] = useState(null)
   const [currentDir, setCurrentDir] = useState(null)
 
+  const searchRef = useRef(search)
+  searchRef.current = search
+
   const fetchDirs = useCallback(async () => {
     try {
       const parentId = currentDir ? currentDir.id : undefined
@@ -55,7 +58,8 @@ export default function PublicFiles() {
     setLoading(true); setError('')
     try {
       const params = { scope: 'public', page, per_page: 20 }
-      if (search) params.keyword = search
+      const kw = searchRef.current
+      if (kw) params.keyword = kw
       if (currentDir) params.directory_id = currentDir.id
       const data = await getFiles(params)
       setFiles(data.items || [])
@@ -63,9 +67,27 @@ export default function PublicFiles() {
       setPages(data.pages || 0)
     } catch (err) { setError(err.message) }
     finally { setLoading(false) }
-  }, [page, search, currentDir])
+  }, [page, currentDir])
 
-  useEffect(() => { fetchDirs(); fetchFiles() }, [fetchDirs, fetchFiles])
+  useEffect(() => {
+    let cancelled = false
+    fetchDirs()
+    setLoading(true); setError('')
+    const params = { scope: 'public', page, per_page: 20 }
+    const kw = searchRef.current
+    if (kw) params.keyword = kw
+    if (currentDir) params.directory_id = currentDir.id
+    getFiles(params)
+      .then(data => {
+        if (cancelled) return
+        setFiles(data.items || [])
+        setTotal(data.total || 0)
+        setPages(data.pages || 0)
+      })
+      .catch(err => { if (!cancelled) setError(err.message) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [page, currentDir, fetchDirs])
 
   const handleSearch = (e) => { e.preventDefault(); setPage(1); fetchFiles() }
 
@@ -132,7 +154,7 @@ export default function PublicFiles() {
           {dirs.map(dir => (
             <button key={dir.id} onClick={() => enterDir({ id: dir.id, name: dir.name })}
               className="flex items-center gap-2 p-3 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl hover:border-[var(--color-primary)] hover:shadow-sm cursor-pointer transition-smooth text-left">
-              <Folder size={20} className="text-amber-500 shrink-0" />
+              <Folder size={20} className="text-[var(--color-primary)] shrink-0" />
               <span className="text-sm font-medium text-[var(--color-text)] truncate">{dir.name}</span>
             </button>
           ))}
@@ -156,7 +178,8 @@ export default function PublicFiles() {
               </tr>
             </thead>
             <tbody>
-              {files.map(file => {
+              {files.length > 0 ? (
+                files.map(file => {
                 const ext = (file.original_filename || '').split('.').pop()?.toLowerCase()
                 const typeKey = getTypeKey(ext)
                 return (
@@ -174,17 +197,17 @@ export default function PublicFiles() {
                     </td>
                   </tr>
                 )
-              })}
-              {!loading && files.length === 0 && (
-                <tr><td colSpan={6} className="px-5 py-12 text-center text-[var(--color-text-subtle)]">
+              })
+              ) : !loading ? (
+                <tr key="__public_empty__"><td colSpan={6} className="px-5 py-12 text-center text-[var(--color-text-subtle)]">
                   <Globe size={32} className="mx-auto mb-2 opacity-40" />{currentDir ? '此目录暂无文件' : '公共目录暂无文件'}
                 </td></tr>
-              )}
+              ) : null}
             </tbody>
           </table>
         </div>
         <div className="px-5 py-3 border-t border-[var(--color-border)] flex items-center justify-between text-sm text-[var(--color-text-subtle)]">
-          <span>共 {total} 个文件 · 仅支持上传和下载操作{loading && ' · 加载中...'}</span>
+          <span><span>共 {total} 个文件 · 仅支持上传和下载操作</span>{loading && <span> · 加载中...</span>}</span>
           <div className="flex items-center gap-2">
             <button onClick={() => setPage(p => Math.max(1,p-1))} disabled={page<=1} className="px-3 py-1 rounded border border-[var(--color-border)] hover:bg-[var(--color-primary-light)] text-xs cursor-pointer disabled:opacity-40">上一页</button>
             <span className="text-xs px-2">{page} / {pages || 1}</span>

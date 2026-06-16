@@ -26,6 +26,7 @@ class User(db.Model):
     password_hash = db.Column(db.String(256), nullable=False)
     role = db.Column(db.String(20), nullable=False, default=ROLE_USER)
     department = db.Column(db.String(128), default='')                             # 部门：开发/售前/售后
+    serial_number = db.Column(db.String(128), nullable=True)                       # 硬件序列号
     status = db.Column(db.String(20), nullable=False, default='active')
     login_attempts = db.Column(db.Integer, default=0)
     locked_until = db.Column(db.DateTime, nullable=True)
@@ -67,6 +68,7 @@ class User(db.Model):
             'username': self.username,
             'role': self.role,
             'department': self.department,
+            'serial_number': self.serial_number,
             'status': self.status,
             'last_login_at': fmt_utc(self.last_login_at),
             'last_login_ip': self.last_login_ip,

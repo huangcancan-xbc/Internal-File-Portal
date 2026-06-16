@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Trash2, RotateCcw, Search, AlertTriangle } from 'lucide-react'
 import { getRecycleBin, restoreFile, permanentDeleteFile, emptyRecycleBin } from '../api/index.js'
 
@@ -19,12 +19,15 @@ export default function RecycleBin() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
+  const searchRef = useRef(search)
+  searchRef.current = search
+
   const fetchFiles = async () => {
-    setLoading(true)
-    setError('')
+    setLoading(true); setError('')
     try {
       const params = { page, per_page: 20 }
-      if (search) params.keyword = search
+      const kw = searchRef.current
+      if (kw) params.keyword = kw
       const data = await getRecycleBin(params)
       setFiles(data.items || [])
       setTotal(data.total || 0)
@@ -33,7 +36,23 @@ export default function RecycleBin() {
     finally { setLoading(false) }
   }
 
-  useEffect(() => { fetchFiles() }, [page])
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true); setError('')
+    const params = { page, per_page: 20 }
+    const kw = searchRef.current
+    if (kw) params.keyword = kw
+    getRecycleBin(params)
+      .then(data => {
+        if (cancelled) return
+        setFiles(data.items || [])
+        setTotal(data.total || 0)
+        setPages(data.pages || 0)
+      })
+      .catch(err => { if (!cancelled) setError(err.message) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [page])
 
   const handleSearch = (e) => { e.preventDefault(); setPage(1); fetchFiles() }
 
@@ -104,7 +123,8 @@ export default function RecycleBin() {
               </tr>
             </thead>
             <tbody>
-              {files.map(file => (
+              {files.length > 0 ? (
+                files.map(file => (
                 <tr key={file.id} className="border-t border-[var(--color-border)] hover:bg-[var(--color-primary-light)]">
                   <td className={`${td} text-[var(--color-text)] font-medium`}>{file.original_filename}</td>
                   <td className={`${td} text-[var(--color-text-muted)] text-xs uppercase`}>{file.file_type || '-'}</td>
@@ -121,17 +141,17 @@ export default function RecycleBin() {
                     </div>
                   </td>
                 </tr>
-              ))}
-              {!loading && files.length === 0 && (
-                <tr><td colSpan={5} className="px-5 py-12 text-center text-[var(--color-text-subtle)]">
+              ))
+) : !loading ? (
+                <tr key="__recycle_empty__"><td colSpan={5} className="px-5 py-12 text-center text-[var(--color-text-subtle)]">
                   <AlertTriangle size={32} className="mx-auto mb-2 opacity-40" />回收站为空
                 </td></tr>
-              )}
+              ) : null}
             </tbody>
           </table>
         </div>
         <div className="px-5 py-3 border-t border-[var(--color-border)] flex items-center justify-between text-sm text-[var(--color-text-subtle)]">
-          <span>共 {total} 个文件 {loading && '· 加载中...'}</span>
+          <span><span>共 {total} 个文件</span>{loading && <span>· 加载中...</span>}</span>
           <div className="flex items-center gap-2">
             <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page <= 1} className="px-3 py-1 rounded border border-[var(--color-border)] hover:bg-[var(--color-primary-light)] text-xs cursor-pointer disabled:opacity-40">上一页</button>
             <span className="text-xs px-2">{page} / {pages || 1}</span>

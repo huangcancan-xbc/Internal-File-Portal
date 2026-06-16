@@ -17,7 +17,6 @@ const adminLinks = [
 const userLinks = [
   { to: '/my-files', icon: FileText, label: '我的文件' },
   { to: '/public-files', icon: Globe, label: '公共目录' },
-  { to: '/recycle-bin', icon: Trash2, label: '回收站' },
   { to: '/profile', icon: User, label: '个人信息' },
 ]
 
@@ -29,7 +28,7 @@ export default function Sidebar({ isAdmin, onClose }) {
       {/* Logo area */}
       <div className="h-16 flex items-center justify-between px-6 border-b border-[var(--color-border)]">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-gradient-to-br from-amber-500 to-orange-600 rounded-lg flex items-center justify-center">
+          <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-blue-700 rounded-lg flex items-center justify-center">
             <FolderOpen size={20} className="text-white" />
           </div>
           <div>

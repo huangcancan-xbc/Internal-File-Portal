@@ -32,7 +32,7 @@ export default function NotificationBell({ isAdmin }) {
     try {
       const token = localStorage.getItem('access_token')
       const res = await fetch(`${BASE}/announcements/?per_page=20`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
       })
       if (!res.ok) throw new Error('加载失败')
       const data = await res.json()
@@ -71,10 +71,10 @@ export default function NotificationBell({ isAdmin }) {
   const handlePublish = async () => {
     if (!title.trim() || !content.trim()) return
     try {
-      const token = localStorage.getItem('access_token')
+      const token = localStorage.getItem('token') || localStorage.getItem('access_token') || ''
       const res = await fetch(`${BASE}/announcements/`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, 
         body: JSON.stringify({ title: title.trim(), content: content.trim() })
       })
       if (!res.ok) throw new Error((await res.json()).error || '发布失败')
@@ -85,7 +85,7 @@ export default function NotificationBell({ isAdmin }) {
 
   const handleDelete = async (id) => {
     try {
-      const token = localStorage.getItem('access_token')
+      const token = localStorage.getItem('token') || localStorage.getItem('access_token') || ''
       await fetch(`${BASE}/announcements/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }

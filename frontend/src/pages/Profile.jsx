@@ -6,7 +6,7 @@ const DEPTS = ['开发', '售前', '售后']
 
 export default function Profile({ user, onUpdate }) {
   const [form, setForm] = useState({
-    username: user?.username || '',
+    account: user?.account || '',
     department: user?.department || '',
   })
   const [saving, setSaving] = useState(false)
@@ -24,12 +24,12 @@ export default function Profile({ user, onUpdate }) {
     e.preventDefault()
     setError(''); setSuccess(''); setSaving(true)
     try {
-      await api('/auth/profile', {
+      const res = await api('/auth/profile', {
         method: 'PUT',
-        body: JSON.stringify({ account: form.username, department: form.department })
+        body: JSON.stringify({ account: form.account, department: form.department })
       })
       setSuccess('个人信息已更新')
-      const updated = { ...user, account: form.username, department: form.department }
+      const updated = res.data || { ...user, account: form.account, department: form.department }
       localStorage.setItem('auth', JSON.stringify(updated))
       if (onUpdate) onUpdate(updated)
     } catch (err) { setError(err.message) }
@@ -80,8 +80,8 @@ export default function Profile({ user, onUpdate }) {
             <input type="text" value={user.role === 'admin' ? '管理员' : '普通用户'} disabled className={`${inputCls} opacity-60 cursor-not-allowed`} />
           </div>
           <div>
-            <label className={labelCls}>用户名</label>
-            <input type="text" value={form.username} onChange={e => setForm(f => ({...f, username: e.target.value}))} className={inputCls} required />
+            <label className={labelCls}>登录账号</label>
+            <input type="text" value={form.account} onChange={e => setForm(f => ({...f, account: e.target.value}))} className={inputCls} required />
           </div>
           <div>
             <label className={labelCls}>部门</label>

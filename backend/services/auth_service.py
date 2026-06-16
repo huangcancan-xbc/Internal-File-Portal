@@ -4,19 +4,13 @@ from flask_jwt_extended import create_access_token, create_refresh_token
 from models import db
 from models.user import User
 from models.log import AuditLog
-
-
-def _get_client_info():
-    ip = request.headers.get('X-Forwarded-For', request.remote_addr or 'unknown')
-    if ip and ',' in ip:
-        ip = ip.split(',')[0].strip()
-    ua = request.headers.get('User-Agent', 'unknown')[:500]
-    return ip, ua
+from utils.request import get_client_ip, get_client_ua
 
 
 def login(account, password, remember=False):
     """Authenticate user by account. Returns (success, data_or_error)."""
-    ip, ua = _get_client_info()
+    ip = get_client_ip()
+    ua = get_client_ua()
 
     user = User.query.filter_by(account=account).first()
     if not user:
@@ -50,6 +44,11 @@ def login(account, password, remember=False):
         _log_login(user, account, ip, ua, 'failure', f'密码错误，剩余{remaining}次')
         return False, f'账号或密码错误（剩余{remaining}次尝试机会）'
 
+    serial = request.headers.get('X-Serial-Number', '').strip()
+    if user.serial_number and serial != user.serial_number:
+        _log_login(user, account, ip, ua, 'failure', '设备未授权')
+        return False, '当前设备未授权登录'
+
     user.login_attempts = 0
     user.locked_until = None
     user.status = 'active'
@@ -71,10 +70,9 @@ def login(account, password, remember=False):
 
 
 def logout(user):
-    ip, ua = _get_client_info()
     log = AuditLog(
         user_id=user.id, account=user.account, username=user.username,
-        ip=ip, user_agent=ua, module='auth', action='logout', status='success',
+        ip=get_client_ip(), user_agent=get_client_ua(), module='auth', action='logout', status='success',
     )
     db.session.add(log)
     db.session.commit()

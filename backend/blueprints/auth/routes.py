@@ -4,6 +4,7 @@ from blueprints.auth import auth_bp
 from services.auth_service import login, logout
 from models.user import User
 from utils.permissions import get_current_user
+from utils.request import get_client_ip, get_client_ua
 from models import db
 from models.log import AuditLog
 
@@ -46,6 +47,22 @@ def api_me():
     return jsonify({'data': user.to_dict(include_permissions=True)}), 200
 
 
+@auth_bp.route('/profile', methods=['PUT'])
+@jwt_required()
+def api_update_profile():
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': '用户不存在'}), 404
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': '请求数据为空'}), 400
+    from services.user_service import update_profile
+    success, result = update_profile(user, data)
+    if not success:
+        return jsonify({'error': result}), 400
+    return jsonify({'message': '个人信息更新成功', 'data': result}), 200
+
+
 @auth_bp.route('/refresh', methods=['POST'])
 @jwt_required(refresh=True)
 def api_refresh():
@@ -85,11 +102,9 @@ def api_change_password():
 
     user.set_password(new_pwd)
 
-    ip = request.headers.get('X-Forwarded-For', request.remote_addr or '')
-    ua = request.headers.get('User-Agent', '')[:500]
     log = AuditLog(
         user_id=user.id, account=user.account, username=user.username,
-        ip=ip, user_agent=ua, module='user', action='change_password',
+        ip=get_client_ip(), user_agent=get_client_ua(), module='user', action='change_password',
         detail='修改了个人密码', status='success',
     )
     db.session.add(log)

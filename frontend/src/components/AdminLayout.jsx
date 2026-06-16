@@ -1,14 +1,12 @@
-import { Outlet } from 'react-router-dom'
 import Sidebar from './Sidebar.jsx'
 import { useTheme } from './ThemeContext.jsx'
 import NotificationBell from './NotificationBell.jsx'
 import { useState } from 'react'
 import { Menu, User, LogOut, Sun, Moon } from 'lucide-react'
 
-export default function AdminLayout({ user, onLogout }) {
+export default function AdminLayout({ user, onLogout, onUpdate, isAdmin, children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const { dark, toggle } = useTheme()
-  const isAdmin = user.role === 'admin'
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--color-bg)]">
@@ -79,7 +77,7 @@ export default function AdminLayout({ user, onLogout }) {
 
         {/* Page content */}
         <main className="flex-1 overflow-auto p-4 lg:p-6">
-          <Outlet />
+          {children}
         </main>
       </div>
     </div>

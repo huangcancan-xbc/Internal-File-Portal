@@ -1,7 +1,9 @@
 import os
+import re
 import uuid
 import shutil
 from datetime import datetime, timezone
+from pypinyin import lazy_pinyin
 from flask import current_app, request, send_file
 from models import db
 from models.user import User, ROLE_ADMIN
@@ -12,23 +14,45 @@ from utils.request import get_client_ip, get_client_ua
 
 
 def _audit(user, action, detail, file_record=None):
-    ip = get_client_ip() if request else 'system'
-    ua = get_client_ua() if request else ''
     log = AuditLog(
         user_id=user.id, account=user.account, username=user.username,
-        ip=ip, user_agent=ua, module='file', action=action, detail=detail,
+        ip=get_client_ip() if request else 'system', user_agent=get_client_ua() if request else '',
+        module='file', action=action, detail=detail,
     )
     db.session.add(log)
     db.session.commit()
 
 
-def _physical_path(scope, user_id, filename):
-    """Generate physical storage path for a file."""
-    unique_name = f"{uuid.uuid4().hex}_{filename}"
+def _detach_copy_audits(*file_ids):
+    """Clear copy audit FK refs so file records can be permanently deleted."""
+    ids = [i for i in file_ids if i is not None]
+    if not ids:
+        return
+    CopyAudit.query.filter(CopyAudit.file_id.in_(ids)).update(
+        {CopyAudit.file_id: None}, synchronize_session=False
+    )
+
+
+def _safe_user_dir(user):
+    """Generate a safe directory name for a user: pinyin_account + user.id."""
+    raw = user.account or str(user.id)
+    if re.search(r'[\u4e00-\u9fff]', raw):
+        raw = ''.join(lazy_pinyin(raw))
+    safe = re.sub(r'[^\w\-.]', '_', raw)
+    return f"{safe}_{user.id}"
+
+
+def _physical_path(scope, user, filename):
+    """Generate physical storage path for a file.
+
+    public/  → flat structure: {16-hex}_{filename}
+    private/ → per-user dir:   {pinyin_account}_{user.id}/{16-hex}_{filename}
+    """
+    unique_name = f"{uuid.uuid4().hex[:16]}_{filename}"
     if scope == 'public':
         return os.path.join(current_app.config['PUBLIC_FOLDER'], unique_name)
     else:
-        user_dir = os.path.join(current_app.config['PRIVATE_FOLDER'], str(user_id))
+        user_dir = os.path.join(current_app.config['PRIVATE_FOLDER'], _safe_user_dir(user))
         os.makedirs(user_dir, exist_ok=True)
         return os.path.join(user_dir, unique_name)
 
@@ -120,7 +144,7 @@ def upload_file(user, files, directory_id=None, scope='public'):
         actual_scope = scope
         owner_id = user.id
 
-        file_path = _physical_path(actual_scope, user.id, filename)
+        file_path = _physical_path(actual_scope, user, filename)
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         f.save(file_path)
 
@@ -244,6 +268,9 @@ def list_files(user, scope='public', directory_id=None, page=1, per_page=20,
 
 def delete_file(user, file_id):
     """Soft-delete a file (move to recycle bin)."""
+    if not user.is_admin():
+        return False, '仅管理员可删除文件'
+
     record = FileRecord.query.get(file_id)
     if not record or record.status == 'deleted':
         return False, '文件不存在'
@@ -261,9 +288,9 @@ def delete_file(user, file_id):
 
 def list_deleted_files(user, page=1, per_page=20, keyword=None):
     """List files in recycle bin."""
-    query = FileRecord.query.filter_by(status='deleted')
     if not user.is_admin():
-        query = query.filter_by(owner_id=user.id)
+        return {'items': [], 'total': 0, 'page': page, 'per_page': per_page, 'pages': 0}
+    query = FileRecord.query.filter_by(status='deleted')
     if keyword:
         query = query.filter(FileRecord.original_filename.like(f'%{keyword}%'))
     pagination = query.order_by(FileRecord.updated_at.desc()).paginate(
@@ -279,6 +306,8 @@ def list_deleted_files(user, page=1, per_page=20, keyword=None):
 
 def restore_file(user, file_id):
     """Restore a file from recycle bin."""
+    if not user.is_admin():
+        return False, '仅管理员可恢复文件'
     record = FileRecord.query.get(file_id)
     if not record or record.status != 'deleted':
         return False, '文件不在回收站中'
@@ -292,6 +321,8 @@ def restore_file(user, file_id):
 
 def permanent_delete_file(user, file_id):
     """Permanently delete a file from recycle bin (remove physical file)."""
+    if not user.is_admin():
+        return False, '仅管理员可永久删除文件'
     record = FileRecord.query.get(file_id)
     if not record or record.status != 'deleted':
         return False, '文件不在回收站中'
@@ -302,10 +333,11 @@ def permanent_delete_file(user, file_id):
     if record.file_path and os.path.exists(record.file_path):
         try:
             os.remove(record.file_path)
-        except OSError:
-            pass
+        except OSError as e:
+            return False, f'物理文件删除失败: {e}'
 
     name = record.original_filename
+    _detach_copy_audits(record.id)
     db.session.delete(record)
     db.session.commit()
     _audit(user, 'permanent_delete', f'永久删除了「{name}」')
@@ -314,24 +346,31 @@ def permanent_delete_file(user, file_id):
 
 def empty_recycle_bin(user):
     """Permanently delete all files in recycle bin."""
-    query = FileRecord.query.filter_by(status='deleted')
     if not user.is_admin():
-        query = query.filter_by(owner_id=user.id)
-
+        return False, '仅管理员可清空回收站'
+    query = FileRecord.query.filter_by(status='deleted')
     records = query.all()
-    count = 0
+    _detach_copy_audits(*(r.id for r in records))
+    deleted = 0
+    failed = 0
     for record in records:
+        physical_ok = True
         if record.file_path and os.path.exists(record.file_path):
             try:
                 os.remove(record.file_path)
             except OSError:
-                pass
-        db.session.delete(record)
-        count += 1
+                physical_ok = False
+                failed += 1
+        if physical_ok:
+            db.session.delete(record)
+            deleted += 1
 
     db.session.commit()
-    _audit(user, 'empty_recycle_bin', f'清空了回收站，永久删除 {count} 个文件')
-    return True, f'已永久删除 {count} 个文件'
+    _audit(user, 'empty_recycle_bin',
+           f'清空了回收站，永久删除 {deleted} 个文件' + (f'，{failed} 个物理文件删除失败' if failed else ''))
+    if failed:
+        return True, f'已删除 {deleted} 个记录，{failed} 个物理文件删除失败（记录已保留）'
+    return True, f'已永久删除 {deleted} 个文件'
 
 
 def rename_file(user, file_id, new_name):
@@ -353,6 +392,29 @@ def rename_file(user, file_id, new_name):
     return True, record.to_dict()
 
 
+def _resolve_target_directory(user, record, target_directory_id):
+    """Return a writable target directory for a file, or None for root."""
+    if target_directory_id in (None, ''):
+        return None, None
+
+    try:
+        target_directory_id = int(target_directory_id)
+    except (TypeError, ValueError):
+        return None, '目标目录不存在或无权限'
+
+    target_dir = Directory.query.get(target_directory_id)
+    if not target_dir or target_dir.scope != record.scope:
+        return None, '目标目录不存在或无权限'
+
+    if record.scope == 'private':
+        if target_dir.owner_id != record.owner_id:
+            return None, '目标目录不存在或无权限'
+        if not user.is_admin() and target_dir.owner_id != user.id:
+            return None, '目标目录不存在或无权限'
+
+    return target_dir, None
+
+
 def move_file(user, file_id, target_directory_id):
     """Move a file to another directory."""
     record = FileRecord.query.get(file_id)
@@ -364,14 +426,12 @@ def move_file(user, file_id, target_directory_id):
     if record.scope == 'private' and record.owner_id != user.id and not user.is_admin():
         return False, '没有权限移动该文件'
 
-    target_dir = Directory.query.get(target_directory_id)
-    if not target_dir:
-        return False, '目标目录不存在'
+    target_dir, err = _resolve_target_directory(user, record, target_directory_id)
+    if err:
+        return False, err
 
-    old_dir = record.directory_id
-    record.directory_id = target_directory_id
+    record.directory_id = target_dir.id if target_dir else None
     db.session.commit()
-    target_dir = Directory.query.get(target_directory_id)
     _audit(user, 'move',
            f'将「{record.original_filename}」移动到「{target_dir.name if target_dir else "根目录"}」',
            record)
@@ -390,7 +450,11 @@ def copy_file(user, file_id, target_directory_id=None, copy_type='internal'):
         if not perm or not perm.has_permission(PERM_COPY):
             return False, '没有拷贝权限'
 
-    new_path = _physical_path(record.scope, user.id, record.original_filename)
+    target_dir, err = _resolve_target_directory(user, record, target_directory_id)
+    if err:
+        return False, err
+
+    new_path = _physical_path(record.scope, user, record.original_filename)
     shutil.copy2(record.file_path, new_path)
 
     new_record = FileRecord(
@@ -400,7 +464,7 @@ def copy_file(user, file_id, target_directory_id=None, copy_type='internal'):
         file_size=record.file_size,
         file_type=record.file_type,
         mime_type=record.mime_type,
-        directory_id=target_directory_id or record.directory_id,
+        directory_id=target_dir.id if target_dir else record.directory_id,
         owner_id=user.id,
         scope=record.scope,
     )
@@ -425,6 +489,168 @@ def copy_file(user, file_id, target_directory_id=None, copy_type='internal'):
     _audit(user, 'copy',
            f'拷贝了「{record.original_filename}」', record)
     return True, new_record.to_dict()
+
+
+BATCH_MAX = 100
+
+
+def _parse_file_ids(file_ids):
+    if not file_ids or not isinstance(file_ids, list):
+        return None, '请提供文件 ID 列表'
+    try:
+        ids = list(dict.fromkeys(int(x) for x in file_ids))
+    except (TypeError, ValueError):
+        return None, '文件 ID 格式无效'
+    if not ids:
+        return None, '请至少选择一个文件'
+    if len(ids) > BATCH_MAX:
+        return None, f'单次最多操作 {BATCH_MAX} 个文件'
+    return ids, None
+
+
+def _batch_summary(results):
+    success_count = sum(1 for r in results if r['status'] == 'success')
+    fail_count = len(results) - success_count
+    return {
+        'success_count': success_count,
+        'fail_count': fail_count,
+        'results': results,
+    }
+
+
+def batch_delete_files(user, file_ids):
+    """Soft-delete multiple files (move to recycle bin)."""
+    ids, err = _parse_file_ids(file_ids)
+    if err:
+        return False, err
+    if not user.is_admin():
+        return False, '仅管理员可删除文件'
+
+    results = []
+    for file_id in ids:
+        record = FileRecord.query.get(file_id)
+        if not record or record.status == 'deleted':
+            results.append({'file_id': file_id, 'status': 'failure', 'reason': '文件不存在'})
+            continue
+        if record.scope == 'public' and not user.is_admin():
+            results.append({'file_id': file_id, 'filename': record.original_filename,
+                            'status': 'failure', 'reason': '公共目录文件仅管理员可删除'})
+            continue
+        record.status = 'deleted'
+        results.append({'file_id': file_id, 'filename': record.original_filename, 'status': 'success'})
+
+    db.session.commit()
+    summary = _batch_summary(results)
+    sc, fc = summary['success_count'], summary['fail_count']
+    detail = f'批量移入回收站 {sc} 个文件' + (f'（{fc} 个失败）' if fc else '')
+    _audit(user, 'delete', detail)
+    return True, summary
+
+
+def batch_move_files(user, file_ids, target_directory_id):
+    """Move multiple files to a directory (None = root)."""
+    ids, err = _parse_file_ids(file_ids)
+    if err:
+        return False, err
+
+    target_dir_name = '根目录'
+    results = []
+    for file_id in ids:
+        record = FileRecord.query.get(file_id)
+        if not record or record.status == 'deleted':
+            results.append({'file_id': file_id, 'status': 'failure', 'reason': '文件不存在'})
+            continue
+        if record.scope == 'public' and not user.is_admin():
+            results.append({'file_id': file_id, 'filename': record.original_filename,
+                            'status': 'failure', 'reason': '仅管理员可移动公共目录文件'})
+            continue
+        if record.scope == 'private' and record.owner_id != user.id and not user.is_admin():
+            results.append({'file_id': file_id, 'filename': record.original_filename,
+                            'status': 'failure', 'reason': '没有权限移动该文件'})
+            continue
+        target_dir, err = _resolve_target_directory(user, record, target_directory_id)
+        if err:
+            results.append({'file_id': file_id, 'filename': record.original_filename,
+                            'status': 'failure', 'reason': err})
+            continue
+        target_dir_name = target_dir.name if target_dir else '根目录'
+        record.directory_id = target_dir.id if target_dir else None
+        results.append({'file_id': file_id, 'filename': record.original_filename, 'status': 'success'})
+
+    db.session.commit()
+    summary = _batch_summary(results)
+    sc, fc = summary['success_count'], summary['fail_count']
+    _audit(user, 'move', f'批量移动 {sc} 个文件到「{target_dir_name}」' + (f'（{fc} 个失败）' if fc else ''))
+    return True, summary
+
+
+def batch_copy_files(user, file_ids, target_directory_id=None, copy_type='internal'):
+    """Copy multiple files within the system."""
+    ids, err = _parse_file_ids(file_ids)
+    if err:
+        return False, err
+
+    results = []
+    for file_id in ids:
+        record = FileRecord.query.get(file_id)
+        if not record or record.status == 'deleted':
+            results.append({'file_id': file_id, 'status': 'failure', 'reason': '源文件不存在'})
+            continue
+        if record.scope == 'public' and not user.is_admin():
+            from models.user import UserPermission, PERM_COPY
+            perm = UserPermission.query.filter_by(user_id=user.id, scope='public').first()
+            if not perm or not perm.has_permission(PERM_COPY):
+                results.append({'file_id': file_id, 'filename': record.original_filename,
+                                'status': 'failure', 'reason': '没有拷贝权限'})
+                continue
+
+        target_dir, err = _resolve_target_directory(user, record, target_directory_id)
+        if err:
+            results.append({'file_id': file_id, 'filename': record.original_filename,
+                            'status': 'failure', 'reason': err})
+            continue
+
+        try:
+            new_path = _physical_path(record.scope, user, record.original_filename)
+            shutil.copy2(record.file_path, new_path)
+            new_record = FileRecord(
+                filename=os.path.basename(new_path),
+                original_filename=record.original_filename,
+                file_path=new_path,
+                file_size=record.file_size,
+                file_type=record.file_type,
+                mime_type=record.mime_type,
+                directory_id=target_dir.id if target_dir else record.directory_id,
+                owner_id=user.id,
+                scope=record.scope,
+            )
+            db.session.add(new_record)
+            db.session.flush()
+
+            ip = get_client_ip() if request else 'system'
+            ua = get_client_ua() if request else ''
+            copy_log = CopyAudit(
+                user_id=user.id, account=user.account, username=user.username,
+                file_id=record.id,
+                source_filename=record.original_filename,
+                source_path=record.file_path,
+                target_path=new_path,
+                file_size=record.file_size,
+                copy_type=copy_type, ip=ip, user_agent=ua,
+            )
+            db.session.add(copy_log)
+            db.session.commit()
+            results.append({'file_id': file_id, 'filename': record.original_filename,
+                            'status': 'success', 'new_file_id': new_record.id})
+        except OSError as e:
+            db.session.rollback()
+            results.append({'file_id': file_id, 'filename': record.original_filename,
+                            'status': 'failure', 'reason': f'复制失败: {e}'})
+
+    summary = _batch_summary(results)
+    sc, fc = summary['success_count'], summary['fail_count']
+    _audit(user, 'copy', f'批量拷贝 {sc} 个文件' + (f'（{fc} 个失败）' if fc else ''))
+    return True, summary
 
 
 def list_directories(user, scope='public', parent_id=None):

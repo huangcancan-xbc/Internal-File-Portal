@@ -1,8 +1,7 @@
-import { useState, useEffect } from 'react'
-import { Upload, Search, Download, Eye, Trash2, Copy } from 'lucide-react'
-import { getFiles, deleteFile, uploadFiles, downloadFile, copyFile } from '../../api/index.js'
+import { useState, useEffect, useRef } from 'react'
+import { Upload, Search, Download, Eye } from 'lucide-react'
+import { getFiles, uploadFiles, downloadFile } from '../../api/index.js'
 import PreviewModal from '../../components/PreviewModal.jsx'
-import CopyModal from '../../components/CopyModal.jsx'
 
 const typeColors = {
   document: 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400',
@@ -42,14 +41,18 @@ export default function UserFiles() {
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [previewFile, setPreviewFile] = useState(null)
-  const [copyTarget, setCopyTarget] = useState(null)
+  const [dragOver, setDragOver] = useState(false)
+  const dropRef = useRef(null)
+
+  const searchRef = useRef(search)
+  searchRef.current = search
 
   const fetchFiles = async () => {
-    setLoading(true)
-    setError('')
+    setLoading(true); setError('')
     try {
       const params = { scope: 'private', page, per_page: 20 }
-      if (search) params.keyword = search
+      const kw = searchRef.current
+      if (kw) params.keyword = kw
       const data = await getFiles(params)
       setFiles(data.items || [])
       setTotal(data.total || 0)
@@ -58,20 +61,32 @@ export default function UserFiles() {
     finally { setLoading(false) }
   }
 
-  useEffect(() => { fetchFiles() }, [page])
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true); setError('')
+    const params = { scope: 'private', page, per_page: 20 }
+    const kw = searchRef.current
+    if (kw) params.keyword = kw
+    getFiles(params)
+      .then(data => {
+        if (cancelled) return
+        setFiles(data.items || [])
+        setTotal(data.total || 0)
+        setPages(data.pages || 0)
+      })
+      .catch(err => { if (!cancelled) setError(err.message) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [page])
 
   const handleSearch = (e) => { e.preventDefault(); setPage(1); fetchFiles() }
-  const handleDelete = async (file) => {
-    if (!confirm(`确定删除 "${file.original_filename}" 吗？`)) return
-    try { await deleteFile(file.id); fetchFiles() } catch (err) { setError(err.message) }
-  }
-  const handleUpload = async (e) => {
-    const fls = e.target.files
-    if (!fls.length) return
+
+  const doUpload = async (files) => {
+    if (!files || !files.length) return
     setError('')
     setSuccess('')
     try {
-      const result = await uploadFiles(fls, 'private')
+      const result = await uploadFiles(files, 'private')
       const { success_count, fail_count, results } = result
       if (fail_count > 0) {
         const fails = results.filter(r => r.status === 'failure').map(r => `${r.filename}: ${r.reason}`).join('；')
@@ -84,7 +99,26 @@ export default function UserFiles() {
       const detail = err.status ? `[HTTP ${err.status}] ` : '[网络] '
       setError(detail + (err.message || '上传失败，请确认后端运行中'))
     }
+  }
+
+  const handleUpload = async (e) => {
+    await doUpload(e.target.files)
     e.target.value = ''
+  }
+
+  const handleDragOver = (e) => { e.preventDefault(); e.stopPropagation(); setDragOver(true) }
+  const handleDragEnter = (e) => { e.preventDefault(); e.stopPropagation(); setDragOver(true) }
+  const handleDragLeave = (e) => {
+    e.preventDefault(); e.stopPropagation()
+    // Only set false when leaving the drop zone (not its children)
+    if (dropRef.current && !dropRef.current.contains(e.relatedTarget)) {
+      setDragOver(false)
+    }
+  }
+  const handleDrop = (e) => {
+    e.preventDefault(); e.stopPropagation()
+    setDragOver(false)
+    doUpload(e.dataTransfer.files)
   }
 
   const card = "bg-[var(--color-surface)] rounded-xl border border-[var(--color-border)] overflow-hidden"
@@ -99,7 +133,7 @@ export default function UserFiles() {
         <div><h1 className="text-xl font-bold text-[var(--color-text)]">我的文件</h1><p className="text-sm text-[var(--color-text-subtle)] mt-1">管理个人私有文件</p></div>
         <label className="flex items-center gap-2 px-4 py-2.5 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white text-sm font-medium rounded-lg cursor-pointer">
           <Upload size={16} /> 上传文件
-          <input type="file" multiple className="hidden" onChange={handleUpload} />
+          <input id="file-upload-input" type="file" multiple className="hidden" onChange={handleUpload} />
         </label>
       </div>
 
@@ -120,7 +154,8 @@ export default function UserFiles() {
               </tr>
             </thead>
             <tbody>
-              {files.map(file => {
+              {files.length > 0 ? (
+                files.map(file => {
                 const ext = (file.original_filename || '').split('.').pop()?.toLowerCase()
                 const typeKey = getTypeKey(ext)
                 return (
@@ -132,24 +167,36 @@ export default function UserFiles() {
                     <td className={td}>
                       <div className="flex items-center gap-1">
                         <button className={btnIcon} onClick={() => setPreviewFile(file)} title="预览"><Eye size={14} /></button>
-                        <button className={btnIcon} onClick={() => setCopyTarget({ file, type: 'internal' })} title="复制到目录"><Copy size={14} /></button>
                         <button className={btnIcon} onClick={() => downloadFile(file.id, file.original_filename, 'local').catch(e => setError(e.message))} title="下载到本地"><Download size={14} /></button>
-                        <button className="p-1.5 rounded hover:bg-[var(--color-danger-light)] text-[var(--color-text-muted)] hover:text-[var(--color-danger)] cursor-pointer" onClick={() => handleDelete(file)} title="删除"><Trash2 size={14} /></button>
                       </div>
                     </td>
                   </tr>
                 )
-              })}
-              {!loading && files.length === 0 && (
-                <tr><td colSpan={5} className="px-5 py-12 text-center text-[var(--color-text-subtle)]">
-                  <Upload size={32} className="mx-auto mb-2 opacity-40" />暂无文件，点击上方按钮上传
+              })
+              ) : !loading ? (
+                <tr key="__userfiles_empty__"><td colSpan={5}
+                  ref={dropRef}
+                  onDragOver={handleDragOver}
+                  onDragEnter={handleDragEnter}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  className={`px-5 py-12 text-center cursor-pointer transition-all ${
+                    dragOver
+                      ? 'border-2 border-dashed border-[var(--color-primary)] bg-[var(--color-primary-light)] text-[var(--color-primary)]'
+                      : 'text-[var(--color-text-subtle)]'
+                  }`}>
+                  <Upload size={40} className={`mx-auto mb-3 transition-all ${dragOver ? 'opacity-100 scale-110' : 'opacity-40'}`} />
+                  {dragOver
+                    ? <span className="font-medium text-base">松开鼠标上传文件</span>
+                    : <span>拖拽文件到此处或<label className="text-[var(--color-primary)] hover:underline cursor-pointer ml-1" onClick={() => document.querySelector('#file-upload-input')?.click()}>点击上传</label></span>
+                  }
                 </td></tr>
-              )}
+              ) : null}
             </tbody>
           </table>
         </div>
         <div className="px-5 py-3 border-t border-[var(--color-border)] flex items-center justify-between text-sm text-[var(--color-text-subtle)]">
-          <span>共 {total} 个文件 {loading && '· 加载中...'}</span>
+          <span><span>共 {total} 个文件</span>{loading && <span>· 加载中...</span>}</span>
           <div className="flex items-center gap-2">
             <button onClick={() => setPage(p => Math.max(1,p-1))} disabled={page<=1} className="px-3 py-1 rounded border border-[var(--color-border)] hover:bg-[var(--color-primary-light)] text-xs cursor-pointer disabled:opacity-40">上一页</button>
             <span className="text-xs px-2">{page} / {pages || 1}</span>
@@ -168,23 +215,6 @@ export default function UserFiles() {
       </div>
 
       <PreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
-
-      {copyTarget?.type === 'internal' && (
-        <CopyModal
-          file={copyTarget.file}
-          scope="private"
-          onConfirm={async (targetDirId) => {
-            try {
-              await copyFile(copyTarget.file.id, targetDirId, 'internal')
-              setSuccess(`"${copyTarget.file.original_filename}" 已复制`)
-              setError('')
-              setCopyTarget(null)
-              fetchFiles()
-            } catch (err) { setError(err.message); setSuccess('') }
-          }}
-          onClose={() => setCopyTarget(null)}
-        />
-      )}
     </div>
   )
 }

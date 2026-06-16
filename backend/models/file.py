@@ -11,7 +11,7 @@ class Directory(db.Model):
     parent_id = db.Column(db.Integer, db.ForeignKey('directories.id'), nullable=True)
     scope = db.Column(db.String(20), nullable=False, default='public')  # public / private
     owner_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # NULL for public
-    path = db.Column(db.String(1024), nullable=False)  # full virtual path e.g. /public/docs
+    path = db.Column(db.String(512), nullable=False)  # full virtual path e.g. /public/docs
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
 

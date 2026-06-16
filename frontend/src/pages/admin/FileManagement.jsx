@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Upload, Search, Download, Eye, Trash2, FolderOpen, List, Grid3X3, X, Plus, Folder, ChevronRight, ArrowUp, Copy } from 'lucide-react'
-import { getFiles, deleteFile, uploadFiles, downloadFile, copyFile, createDirectory, getDirectories } from '../../api/index.js'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Upload, Search, Download, Eye, Trash2, FolderOpen, ChevronRight, ArrowUp, Copy, X, Plus, Folder, FolderInput } from 'lucide-react'
+import { getFiles, deleteFile, uploadFiles, downloadFile, copyFile, createDirectory, getDirectories, batchDeleteFiles, batchMoveFiles, batchCopyFiles } from '../../api/index.js'
 import PreviewModal from '../../components/PreviewModal.jsx'
 import CopyModal from '../../components/CopyModal.jsx'
 
@@ -47,11 +47,14 @@ export default function FileManagement() {
   const [success, setSuccess] = useState('')
   const [selected, setSelected] = useState([])
   const [previewFile, setPreviewFile] = useState(null)
-  const [copyTarget, setCopyTarget] = useState(null)  // {file, type: 'internal'}
+  const [copyTarget, setCopyTarget] = useState(null)  // { file, type: 'internal' } | { files, type: 'internal'|'move' }
   const [showNewDir, setShowNewDir] = useState(false)
   const [newDirName, setNewDirName] = useState('')
   // current directory context: {id, name} or null for root
   const [currentDir, setCurrentDir] = useState(null)
+
+  const searchRef = useRef(search)
+  searchRef.current = search
 
   const fetchDirs = useCallback(async () => {
     try {
@@ -65,7 +68,8 @@ export default function FileManagement() {
     setLoading(true); setError('')
     try {
       const params = { scope: 'public', page, per_page: 20 }
-      if (search) params.keyword = search
+      const kw = searchRef.current
+      if (kw) params.keyword = kw
       if (currentDir) params.directory_id = currentDir.id
       const data = await getFiles(params)
       setFiles(data.items || [])
@@ -73,9 +77,68 @@ export default function FileManagement() {
       setPages(data.pages || 0)
     } catch (err) { setError(err.message) }
     finally { setLoading(false) }
-  }, [page, search, currentDir])
+  }, [page, currentDir])
 
-  useEffect(() => { fetchDirs(); fetchFiles() }, [fetchDirs, fetchFiles])
+  useEffect(() => { setSelected([]) }, [page, currentDir])
+
+  const selectedFiles = files.filter(f => selected.includes(f.id))
+
+  const showBatchResult = (result, actionLabel) => {
+    const { success_count, fail_count, results } = result.data || result
+    if (fail_count > 0) {
+      const fails = (results || []).filter(r => r.status === 'failure')
+        .map(r => `${r.filename || r.file_id}: ${r.reason}`).join('；')
+      setError(`${actionLabel}：成功 ${success_count} 个，失败 ${fail_count} 个。${fails ? ' ' + fails : ''}`)
+      setSuccess('')
+    } else {
+      setSuccess(`${actionLabel}成功，共 ${success_count} 个文件`)
+      setError('')
+    }
+  }
+
+  const handleBatchDelete = async () => {
+    if (!selected.length) return
+    if (!confirm(`确定将选中的 ${selected.length} 个文件移入回收站吗？`)) return
+    try {
+      const result = await batchDeleteFiles(selected)
+      showBatchResult(result, '批量删除')
+      setSelected([])
+      fetchFiles()
+    } catch (err) { setError(err.message); setSuccess('') }
+  }
+
+  const handleBatchDownload = async () => {
+    if (!selected.length) return
+    setError(''); setSuccess('')
+    let ok = 0
+    for (const file of selectedFiles) {
+      try {
+        await downloadFile(file.id, file.original_filename, 'local')
+        ok++
+      } catch { /* continue */ }
+    }
+    setSuccess(`已开始下载 ${ok}/${selected.length} 个文件`)
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    fetchDirs()
+    setLoading(true); setError('')
+    const params = { scope: 'public', page, per_page: 20 }
+    const kw = searchRef.current
+    if (kw) params.keyword = kw
+    if (currentDir) params.directory_id = currentDir.id
+    getFiles(params)
+      .then(data => {
+        if (cancelled) return
+        setFiles(data.items || [])
+        setTotal(data.total || 0)
+        setPages(data.pages || 0)
+      })
+      .catch(err => { if (!cancelled) setError(err.message) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [page, currentDir, fetchDirs])
 
   const handleSearch = (e) => { e.preventDefault(); setPage(1); fetchFiles() }
 
@@ -110,7 +173,7 @@ export default function FileManagement() {
     if (!newDirName.trim()) return
     try {
       const parentId = currentDir ? currentDir.id : null
-      await createDirectory(newDirName.trim(), 'public', parentId)
+      await createDirectory({ name: newDirName.trim(), scope: 'public', parent_id: parentId })
       setShowNewDir(false); setNewDirName('')
       fetchDirs()
     } catch (err) { setError(err.message) }
@@ -130,7 +193,7 @@ export default function FileManagement() {
 
   const card = "bg-[var(--color-surface)] rounded-xl border border-[var(--color-border)] overflow-hidden"
   const th = "text-left px-5 py-3 text-xs font-medium text-[var(--color-text-subtle)] uppercase tracking-wider"
-  const td = "px-4 py-3"
+  const td = "px-5 py-3"
   const input = "w-full pl-10 pr-4 py-2.5 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg text-sm text-[var(--color-text)] placeholder-[var(--color-text-subtle)] focus:outline-none focus:border-[var(--color-primary)]"
   const btnIcon = "p-1.5 rounded hover:bg-[var(--color-primary-light)] text-[var(--color-text-muted)] cursor-pointer"
 
@@ -173,7 +236,7 @@ export default function FileManagement() {
           {dirs.map(dir => (
             <button key={dir.id} onClick={() => enterDir({ id: dir.id, name: dir.name })}
               className="flex items-center gap-2 p-3 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl hover:border-[var(--color-primary)] hover:shadow-sm cursor-pointer transition-smooth text-left">
-              <Folder size={20} className="text-amber-500 shrink-0" />
+              <Folder size={20} className="text-[var(--color-primary)] shrink-0" />
               <span className="text-sm font-medium text-[var(--color-text)] truncate">{dir.name}</span>
             </button>
           ))}
@@ -191,6 +254,34 @@ export default function FileManagement() {
       {error && <div className="bg-[var(--color-danger-light)] border border-red-300 dark:border-red-800 text-[var(--color-danger)] text-sm rounded-lg px-4 py-2.5">{error}</div>}
       {success && <div className="bg-green-50 border border-green-300 dark:bg-green-900/30 dark:border-green-800 text-green-700 dark:text-green-400 text-sm rounded-lg px-4 py-2.5">{success}</div>}
 
+      {selected.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 px-4 py-3 bg-[var(--color-primary-light)] border border-[var(--color-primary)]/30 rounded-xl">
+          <span className="text-sm font-medium text-[var(--color-primary)]">已选 {selected.length} 项</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={handleBatchDelete}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--color-danger)] hover:bg-red-700 text-white text-xs font-medium rounded-lg cursor-pointer">
+              <Trash2 size={14} /> 批量删除
+            </button>
+            <button onClick={() => setCopyTarget({ files: selectedFiles, type: 'move' })}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--color-surface)] border border-[var(--color-border)] hover:bg-white text-[var(--color-text-muted)] text-xs font-medium rounded-lg cursor-pointer">
+              <FolderInput size={14} /> 批量移动
+            </button>
+            <button onClick={() => setCopyTarget({ files: selectedFiles, type: 'internal' })}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--color-surface)] border border-[var(--color-border)] hover:bg-white text-[var(--color-text-muted)] text-xs font-medium rounded-lg cursor-pointer">
+              <Copy size={14} /> 批量复制
+            </button>
+            <button onClick={handleBatchDownload}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--color-surface)] border border-[var(--color-border)] hover:bg-white text-[var(--color-text-muted)] text-xs font-medium rounded-lg cursor-pointer">
+              <Download size={14} /> 批量下载
+            </button>
+            <button onClick={() => setSelected([])}
+              className="px-3 py-1.5 text-xs text-[var(--color-text-subtle)] hover:text-[var(--color-text)] cursor-pointer">
+              取消选择
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Files table */}
       <div className={card}>
         <div className="overflow-x-auto">
@@ -203,10 +294,11 @@ export default function FileManagement() {
               </tr>
             </thead>
             <tbody>
-              {files.map(file => {
-                const ext = (file.original_filename || '').split('.').pop()?.toLowerCase()
-                const typeKey = getTypeKey(ext)
-                return (
+              {files.length > 0 ? (
+                files.map(file => {
+                  const ext = (file.original_filename || '').split('.').pop()?.toLowerCase()
+                  const typeKey = getTypeKey(ext)
+                  return (
                   <tr key={file.id} className="border-t border-[var(--color-border)] hover:bg-[var(--color-primary-light)]">
                     <td className={td}><input type="checkbox" checked={selected.includes(file.id)} onChange={() => toggleSelect(file.id)} className="rounded border-[var(--color-border)]" /></td>
                     <td className={`${td} text-[var(--color-text)] font-medium`}>{file.original_filename}</td>
@@ -224,17 +316,17 @@ export default function FileManagement() {
                     </td>
                   </tr>
                 )
-              })}
-              {!loading && files.length === 0 && (
-                <tr><td colSpan={7} className="px-5 py-8 text-center text-[var(--color-text-subtle)] text-sm">
+              })
+              ) : !loading ? (
+                <tr key="__files_empty__"><td colSpan={7} className="px-5 py-8 text-center text-[var(--color-text-subtle)] text-sm">
                   {currentDir ? '此目录暂无文件' : '暂无文件，上传或新建目录开始使用'}
                 </td></tr>
-              )}
+              ) : null}
             </tbody>
           </table>
         </div>
         <div className="px-5 py-3 border-t border-[var(--color-border)] flex items-center justify-between text-sm text-[var(--color-text-subtle)]">
-          <span>共 {total} 个文件 {loading && '· 加载中...'}</span>
+          <span><span>共 {total} 个文件</span>{loading && <span>· 加载中...</span>}</span>
           <div className="flex items-center gap-2">
             <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page <= 1} className="px-3 py-1 rounded border border-[var(--color-border)] hover:bg-[var(--color-primary-light)] text-xs cursor-pointer disabled:opacity-40">上一页</button>
             <span className="text-xs px-2">{page} / {pages || 1}</span>
@@ -254,16 +346,27 @@ export default function FileManagement() {
 
       <PreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
 
-      {/* Copy Modal (internal) */}
-      {copyTarget?.type === 'internal' && (
+      {/* Copy / Move Modal */}
+      {copyTarget && (
         <CopyModal
           file={copyTarget.file}
+          files={copyTarget.files}
+          mode={copyTarget.type === 'move' ? 'move' : 'copy'}
           scope="public"
           onConfirm={async (targetDirId) => {
             try {
-              await copyFile(copyTarget.file.id, targetDirId, 'internal')
-              setSuccess(`"${copyTarget.file.original_filename}" 已复制`)
-              setError('')
+              if (copyTarget.files?.length) {
+                const ids = copyTarget.files.map(f => f.id)
+                const result = copyTarget.type === 'move'
+                  ? await batchMoveFiles(ids, targetDirId)
+                  : await batchCopyFiles(ids, targetDirId, 'internal')
+                showBatchResult(result, copyTarget.type === 'move' ? '批量移动' : '批量复制')
+                setSelected([])
+              } else if (copyTarget.file) {
+                await copyFile(copyTarget.file.id, targetDirId, 'internal')
+                setSuccess(`"${copyTarget.file.original_filename}" 已复制`)
+                setError('')
+              }
               setCopyTarget(null)
               fetchFiles()
             } catch (err) { setError(err.message); setSuccess('') }
