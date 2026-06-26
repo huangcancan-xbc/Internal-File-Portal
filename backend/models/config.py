@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from models import db
+from models import db, fmt_utc
 
 
 class SystemConfig(db.Model):
@@ -20,7 +20,7 @@ class SystemConfig(db.Model):
             'key': self.key,
             'value': self.value,
             'description': self.description,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'updated_at': fmt_utc(self.updated_at),
         }
 
     @staticmethod
@@ -29,7 +29,13 @@ class SystemConfig(db.Model):
         return cfg.value if cfg else default
 
     @staticmethod
-    def set_value(key, value, description=None, user_id=None):
+    def set_value(key, value, description=None, user_id=None, commit=True):
+        """Create or update a config entry.
+
+        Args:
+            commit: If True, commit immediately. Pass False when batching
+                    multiple set_value calls in a single transaction.
+        """
         cfg = SystemConfig.query.filter_by(key=key).first()
         if cfg:
             cfg.value = value
@@ -39,5 +45,6 @@ class SystemConfig(db.Model):
         else:
             cfg = SystemConfig(key=key, value=value, description=description, updated_by=user_id)
             db.session.add(cfg)
-        db.session.commit()
+        if commit:
+            db.session.commit()
         return cfg

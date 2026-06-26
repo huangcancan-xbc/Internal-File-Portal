@@ -3,7 +3,12 @@ from models import db, fmt_utc
 
 
 class AuditLog(db.Model):
-    """General operation audit log — append-only, never deleted."""
+    """General operation audit log — append-only, never deleted.
+
+    Policy: rows are only ever inserted, never updated or deleted.
+    This is not enforced at the DB level (no triggers), but all application
+    code must respect this invariant.
+    """
     __tablename__ = 'audit_logs'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -47,7 +52,8 @@ class CopyAudit(db.Model):
     source_path = db.Column(db.String(1024), nullable=False)
     target_path = db.Column(db.String(1024), nullable=False)
     file_size = db.Column(db.BigInteger, nullable=False, default=0)
-    copy_type = db.Column(db.String(20), nullable=False)  # internal / local / external
+    # Copy scope: 'internal' = within the system, 'local' = to local disk, 'external' = to USB/email etc.
+    copy_type = db.Column(db.String(20), nullable=False)
     ip = db.Column(db.String(64), nullable=True)
     user_agent = db.Column(db.String(512), nullable=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), index=True)

@@ -6,11 +6,13 @@ from models import db
 from models.announcement import Announcement
 
 
+# list_announcements is accessible to ALL authenticated users (no @admin_required).
+# create and delete require admin.
 @announce_bp.route('/', methods=['GET'])
 @jwt_required()
 def list_announcements():
     page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 10, type=int)
+    per_page = min(request.args.get('per_page', 10, type=int), 100)
     pagination = Announcement.query.order_by(Announcement.created_at.desc()).paginate(
         page=page, per_page=per_page, error_out=False)
     return jsonify({

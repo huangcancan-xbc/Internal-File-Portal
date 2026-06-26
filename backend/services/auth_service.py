@@ -23,8 +23,11 @@ def login(account, password, remember=False):
 
     if user.status == 'deleted':
         _log_login(user, account, ip, ua, 'failure', '账号已删除')
-        return False, '账号不存在'
+        return False, '用户名或密码错误'
 
+    # Attempt to clear expired lockouts BEFORE checking is_locked(),
+    # so that a user whose lockout window has passed can proceed.
+    user.try_unlock()
     if user.is_locked():
         _log_login(user, account, ip, ua, 'failure', '账号已锁定')
         return False, '账号已锁定，请稍后再试'
@@ -44,21 +47,28 @@ def login(account, password, remember=False):
         _log_login(user, account, ip, ua, 'failure', f'密码错误，剩余{remaining}次')
         return False, f'账号或密码错误（剩余{remaining}次尝试机会）'
 
-    serial = request.headers.get('X-Serial-Number', '').strip()
-    if user.serial_number and serial != user.serial_number:
-        _log_login(user, account, ip, ua, 'failure', '设备未授权')
-        return False, '当前设备未授权登录'
-
     user.login_attempts = 0
     user.locked_until = None
-    user.status = 'active'
+    # Only reset 'locked' status; 'disabled' accounts must stay disabled
+    # until an admin explicitly re-enables them.
+    if user.status == 'locked':
+        user.status = 'active'
     user.last_login_at = datetime.now(timezone.utc)
     user.last_login_ip = ip
     db.session.commit()
 
-    expires = None if remember else current_app.config.get('JWT_ACCESS_TOKEN_EXPIRES')
-    access_token = create_access_token(identity=str(user.id), expires_delta=expires)
-    refresh_token = create_refresh_token(identity=str(user.id)) if remember else None
+    # Token expiration policy:
+    # - Normal login: short-lived access token (2h), no refresh token.
+    #   Frequent re-auth reduces risk if token is stolen.
+    # - Remember me: longer-lived access token (7d) + refresh token (30d).
+    #   Trades security for convenience.
+    if remember:
+        access_expires = timedelta(days=7)
+        refresh_token = create_refresh_token(identity=str(user.id))
+    else:
+        access_expires = current_app.config.get('JWT_ACCESS_TOKEN_EXPIRES')
+        refresh_token = None
+    access_token = create_access_token(identity=str(user.id), expires_delta=access_expires)
 
     _log_login(user, account, ip, ua, 'success')
 

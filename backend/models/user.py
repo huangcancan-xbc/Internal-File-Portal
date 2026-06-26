@@ -3,13 +3,17 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from models import db, fmt_utc
 
 
+# ── Permission bitmask ──
+# Combine with bitwise OR: PERM_VIEW | PERM_UPLOAD = 3
+# Check with: mask & PERM_VIEW != 0
+# PERM_ALL must equal the sum of all individual PERM_* values.
 PERM_VIEW = 1
 PERM_UPLOAD = 2
 PERM_DOWNLOAD = 4
 PERM_EXPORT = 8
 PERM_COPY = 16
 PERM_DIR_MANAGE = 32
-PERM_ALL = 63
+PERM_ALL = 63  # 1+2+4+8+16+32
 
 ROLE_ADMIN = 'admin'
 ROLE_USER = 'user'
@@ -26,7 +30,6 @@ class User(db.Model):
     password_hash = db.Column(db.String(256), nullable=False)
     role = db.Column(db.String(20), nullable=False, default=ROLE_USER)
     department = db.Column(db.String(128), default='')                             # 部门：开发/售前/售后
-    serial_number = db.Column(db.String(128), nullable=True)                       # 硬件序列号
     status = db.Column(db.String(20), nullable=False, default='active')
     login_attempts = db.Column(db.Integer, default=0)
     locked_until = db.Column(db.DateTime, nullable=True)
@@ -49,13 +52,24 @@ class User(db.Model):
         return check_password_hash(self.password_hash, password)
 
     def is_locked(self):
+        """Check if account is currently locked (no side effects).
+
+        Returns True if:
+        - status='locked' AND lockout has not expired, OR
+        - status='locked' AND locked_until is None (permanent lock).
+        """
         if self.status == 'locked' and self.locked_until:
-            if datetime.now(timezone.utc) < self.locked_until:
+            return datetime.now(timezone.utc) < self.locked_until
+        return self.status == 'locked'
+
+    def try_unlock(self):
+        """Unlock account if lockout has expired. Returns True if unlocked."""
+        if self.status == 'locked' and self.locked_until:
+            if datetime.now(timezone.utc) >= self.locked_until:
+                self.status = 'active'
+                self.login_attempts = 0
+                self.locked_until = None
                 return True
-            self.status = 'active'
-            self.login_attempts = 0
-            self.locked_until = None
-            db.session.commit()
         return False
 
     def is_admin(self):
@@ -68,7 +82,6 @@ class User(db.Model):
             'username': self.username,
             'role': self.role,
             'department': self.department,
-            'serial_number': self.serial_number,
             'status': self.status,
             'last_login_at': fmt_utc(self.last_login_at),
             'last_login_ip': self.last_login_ip,
@@ -89,6 +102,8 @@ class UserPermission(db.Model):
     directory_id = db.Column(db.Integer, db.ForeignKey('directories.id'), nullable=True)
     permission_mask = db.Column(db.Integer, nullable=False, default=0)
 
+    # One permission row per user+scope+directory combination.
+    # directory_id=NULL means a global-scope (default) permission.
     __table_args__ = (
         db.UniqueConstraint('user_id', 'scope', 'directory_id', name='uq_user_scope_dir'),
     )

@@ -3,7 +3,12 @@ from models import db, fmt_utc
 
 
 class Announcement(db.Model):
-    """System announcements / notifications."""
+    """System announcements / notifications.
+
+    Note: Announcements use hard-delete (db.session.delete), not soft-delete.
+    This is a deliberate design choice — announcements are short-lived and
+    don't require the same recovery guarantees as files.
+    """
     __tablename__ = 'announcements'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -12,21 +17,15 @@ class Announcement(db.Model):
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
+    author = db.relationship('User', foreign_keys=[created_by])
+
     def to_dict(self):
-        author_name = None
-        author_account = None
-        if self.created_by:
-            from models.user import User
-            u = User.query.get(self.created_by)
-            if u:
-                author_name = u.username
-                author_account = u.account
         return {
             'id': self.id,
             'title': self.title,
             'content': self.content,
             'created_by': self.created_by,
-            'author_name': author_name,
-            'author_account': author_account,
+            'author_name': self.author.username if self.author else None,
+            'author_account': self.author.account if self.author else None,
             'created_at': fmt_utc(self.created_at),
         }

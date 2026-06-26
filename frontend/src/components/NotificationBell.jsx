@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Bell, Megaphone, X, Plus, Trash2, Send } from 'lucide-react'
-
-const BASE = '/api'
+import { getAnnouncements, createAnnouncement, deleteAnnouncement } from '../api/index.js'
 
 function fmtTime(iso) {
   if (!iso) return ''
@@ -30,13 +29,8 @@ export default function NotificationBell({ isAdmin }) {
   const fetchAnns = async () => {
     setLoading(true)
     try {
-      const token = localStorage.getItem('access_token')
-      const res = await fetch(`${BASE}/announcements/?per_page=20`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      })
-      if (!res.ok) throw new Error('加载失败')
-      const data = await res.json()
-      setAnns(data.data.items || [])
+      const data = await getAnnouncements()
+      setAnns(data.items || [])
     } catch (err) { setError(err.message) }
     finally { setLoading(false) }
   }
@@ -71,25 +65,16 @@ export default function NotificationBell({ isAdmin }) {
   const handlePublish = async () => {
     if (!title.trim() || !content.trim()) return
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('access_token') || ''
-      const res = await fetch(`${BASE}/announcements/`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, 
-        body: JSON.stringify({ title: title.trim(), content: content.trim() })
-      })
-      if (!res.ok) throw new Error((await res.json()).error || '发布失败')
+      await createAnnouncement({ title: title.trim(), content: content.trim() })
       setShowPublish(false); setTitle(''); setContent('')
       fetchAnns()
     } catch (err) { setError(err.message) }
   }
 
   const handleDelete = async (id) => {
+    if (!confirm('确定删除此公告吗？')) return
     try {
-      const token = localStorage.getItem('token') || localStorage.getItem('access_token') || ''
-      await fetch(`${BASE}/announcements/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
-      })
+      await deleteAnnouncement(id)
       fetchAnns()
     } catch (err) { setError(err.message) }
   }

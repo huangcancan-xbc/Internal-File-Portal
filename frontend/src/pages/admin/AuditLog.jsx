@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useId } from 'react'
-import { Search, Download, X, ChevronDown, Check, Loader2, Filter, Calendar } from 'lucide-react'
+import { Search, Download, X, ChevronDown, Check, Loader2, Filter } from 'lucide-react'
 import { getAuditLogs, getAuditLogOptions } from '../../api/index.js'
+import Pagination from '../../components/Pagination.jsx'
+import { DateRangeFilter } from '../../components/FilterDropdown.jsx'
 
 // ── Constants ──
 
@@ -9,10 +11,10 @@ const ACTION_LABEL = {
   preview: '预览文件', delete: '删除文件', restore: '恢复文件',
   permanent_delete: '永久删除', empty_recycle_bin: '清空回收站',
   rename: '重命名文件', move: '移动文件',
-  copy: '拷贝文件', copy_to_local: '下载到本地',
+  copy: '拷贝文件',
   create_user: '创建用户', update_user: '编辑用户',
   delete_user: '禁用用户', set_permissions: '权限变更', reset_password: '密码重置',
-  create_directory: '创建目录', delete_directory: '删除目录',
+  create_directory: '创建目录', delete_directory: '删除目录', rename_directory: '重命名目录',
   change_password: '修改密码', update_profile: '编辑个人信息',
 }
 
@@ -34,7 +36,6 @@ const ACTION_COLORS = {
   rename: 'bg-sky-50 text-sky-600 dark:bg-sky-900/30 dark:text-sky-400',
   move: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400',
   copy: 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400',
-  copy_to_local: 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400',
   create_user: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400',
   update_user: 'bg-teal-50 text-teal-600 dark:bg-teal-900/30 dark:text-teal-400',
   update_profile: 'bg-teal-50 text-teal-600 dark:bg-teal-900/30 dark:text-teal-400',
@@ -44,6 +45,7 @@ const ACTION_COLORS = {
   change_password: 'bg-orange-50 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400',
   create_directory: 'bg-cyan-50 text-cyan-600 dark:bg-cyan-900/30 dark:text-cyan-400',
   delete_directory: 'bg-rose-50 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400',
+  rename_directory: 'bg-sky-50 text-sky-600 dark:bg-sky-900/30 dark:text-sky-400',
 }
 
 const TABS = [
@@ -102,11 +104,12 @@ function FilterDropdown({ label, options, value, onChange, formatOption, customC
     : (options || [])
 
   const btnRect = btnRef.current?.getBoundingClientRect()
+  const popupW = customContent ? 260 : Math.max(btnRect?.width + 60 || 200, 200)
   const style = btnRect ? {
     position: 'fixed',
     top: btnRect.bottom + 8,
-    left: Math.max(8, Math.min(btnRect.left, window.innerWidth - (customContent ? 280 : 224))),
-    width: customContent ? 'auto' : Math.max(btnRect.width + 60, 200),
+    right: Math.max(8, window.innerWidth - btnRect.right),
+    width: popupW,
     zIndex: 50,
   } : {}
 
@@ -180,44 +183,6 @@ function FilterDropdown({ label, options, value, onChange, formatOption, customC
           )}
         </div>
       )}
-    </div>
-  )
-}
-
-// ── Pagination ──
-
-function Pagination({ page, pages, total, loading, onPageChange }) {
-  return (
-    <div className="px-5 py-3 border-t border-[var(--color-border)] flex items-center justify-between text-sm text-[var(--color-text-subtle)]">
-      <span><span>共 {total} 条日志（永久留存，不可删除）</span>{loading && <span> · 加载中...</span>}</span>
-      <div className="flex items-center gap-2">
-        <button onClick={() => onPageChange(page - 1)} disabled={page <= 1}
-          className="px-3 py-1 rounded border border-[var(--color-border)] hover:bg-[var(--color-primary-light)] text-xs cursor-pointer disabled:opacity-40">
-          上一页
-        </button>
-        <span className="text-xs px-2">{page} / {pages || 1}</span>
-        <button onClick={() => onPageChange(page + 1)} disabled={page >= pages}
-          className="px-3 py-1 rounded border border-[var(--color-border)] hover:bg-[var(--color-primary-light)] text-xs cursor-pointer disabled:opacity-40">
-          下一页
-        </button>
-        <span className="flex items-center gap-1 ml-2" style={{ display: pages > 1 ? 'flex' : 'none' }}>
-          <input type="number" min={1} max={pages} placeholder="页码"
-            onKeyDown={e => {
-              if (e.key === 'Enter') {
-                const v = parseInt(e.target.value)
-                if (v >= 1 && v <= pages) { onPageChange(v); e.target.value = '' }
-              }
-            }}
-            className="w-14 px-2 py-1 text-xs bg-[var(--color-bg)] border border-[var(--color-border)] rounded text-center focus:outline-none focus:border-[var(--color-primary)]" />
-          <button onClick={e => {
-            const inp = e.target.previousElementSibling
-            const v = parseInt(inp.value)
-            if (v >= 1 && v <= pages) { onPageChange(v); inp.value = '' }
-          }} className="px-2 py-1 rounded border border-[var(--color-border)] hover:bg-[var(--color-primary-light)] text-xs cursor-pointer">
-            跳转
-          </button>
-        </span>
-      </div>
     </div>
   )
 }
@@ -434,28 +399,10 @@ export default function AuditLog() {
                   <FilterDropdown label="IP" options={options.ips} value={filters.ip} onChange={v => setFilter('ip', v)} />
                 </th>
                 <th className="text-left px-5 py-3 whitespace-nowrap">
-                  <FilterDropdown 
-                    label="时间" 
-                    icon={Calendar}
-                    value={filters.startTime || filters.endTime} 
-                    customContent={
-                      <div className="p-4 flex flex-col gap-4 min-w-[260px] font-normal normal-case">
-                        <div className="flex flex-col gap-2">
-                          <label className="text-sm font-medium text-[var(--color-text)]">起始时间</label>
-                          <input type="datetime-local" value={filters.startTime} onChange={e => setFilter('startTime', e.target.value)} className={inputCls} style={{ paddingLeft: '1rem' }} />
-                        </div>
-                        <div className="flex flex-col gap-2">
-                          <label className="text-sm font-medium text-[var(--color-text)]">结束时间</label>
-                          <input type="datetime-local" value={filters.endTime} onChange={e => setFilter('endTime', e.target.value)} className={inputCls} style={{ paddingLeft: '1rem' }} />
-                        </div>
-                        <div className="flex justify-end pt-2 mt-2 border-t border-[var(--color-border)]">
-                          <button type="button" onClick={() => { setFilter('startTime', ''); setFilter('endTime', '') }} className="text-xs text-[var(--color-text-subtle)] hover:text-[var(--color-danger)] transition-colors px-2 py-1 rounded-md hover:bg-[var(--color-danger-light)] cursor-pointer">
-                            清除时间筛选
-                          </button>
-                        </div>
-                      </div>
-                    } 
-                  />
+                  <DateRangeFilter label="时间" startTime={filters.startTime} endTime={filters.endTime}
+                    onStartChange={v => setFilter('startTime', v)}
+                    onEndChange={v => setFilter('endTime', v)}
+                    onClear={() => { setFilter('startTime', ''); setFilter('endTime', '') }} />
                 </th>
               </tr>
             </thead>
@@ -495,7 +442,7 @@ export default function AuditLog() {
             </tbody>
           </table>
         </div>
-        <Pagination page={page} pages={pages} total={total} loading={loading} onPageChange={setPage} />
+        <Pagination page={page} pages={pages} total={total} loading={loading} onPageChange={setPage} totalLabel={`共 ${total} 条日志（永久留存，不可删除）`} />
       </div>
     </div>
   )

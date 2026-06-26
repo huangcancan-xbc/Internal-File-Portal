@@ -2,23 +2,26 @@ import os
 import sys
 from flask import Flask, jsonify
 from flask_jwt_extended import JWTManager
-from sqlalchemy import inspect
 from config import Config
 from models import db
 from models.user import User, UserPermission, ROLE_ADMIN, PERM_ALL
 from services.file_service import init_root_directories
+from middleware import init_cors
 
 
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
 
+    # Ensure the backend directory is on sys.path so absolute imports
+    # (e.g. 'from config import Config') work when running `python app.py` directly.
     backend_dir = os.path.abspath(os.path.dirname(__file__))
     if backend_dir not in sys.path:
         sys.path.insert(0, backend_dir)
 
     db.init_app(app)
     jwt = JWTManager(app)
+    init_cors(app)
 
     @jwt.user_lookup_loader
     def user_lookup_callback(_jwt_header, jwt_data):
@@ -65,9 +68,9 @@ def create_app(config_class=Config):
     def internal_error(e):
         return jsonify({'error': '服务器内部错误'}), 500
 
+    # Startup sequence: create tables → seed defaults.
     with app.app_context():
         db.create_all()
-        _ensure_schema()
         _seed_data(app)
 
     return app
@@ -86,6 +89,7 @@ def _seed_data(app):
         db.session.add(admin)
         db.session.flush()
 
+        # Grant admin full permissions on both public and private scopes.
         for scope in ('public', 'private'):
             perm = UserPermission(user_id=admin.id, scope=scope, permission_mask=PERM_ALL)
             db.session.add(perm)
@@ -94,18 +98,6 @@ def _seed_data(app):
         print('[INIT] 管理员已创建: admin / admin123')
 
     init_root_directories()
-
-
-def _ensure_schema():
-    """Apply lightweight additive schema fixes for deployments without migrations."""
-    inspector = inspect(db.engine)
-    if 'users' not in inspector.get_table_names():
-        return
-
-    user_columns = {column['name'] for column in inspector.get_columns('users')}
-    if 'serial_number' not in user_columns:
-        db.session.execute(db.text('ALTER TABLE users ADD COLUMN serial_number VARCHAR(128) NULL'))
-        db.session.commit()
 
 
 if __name__ == '__main__':

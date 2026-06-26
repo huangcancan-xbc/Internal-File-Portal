@@ -56,6 +56,7 @@ def api_update_profile():
     data = request.get_json()
     if not data:
         return jsonify({'error': '请求数据为空'}), 400
+    # Inline import to avoid circular dependency (auth_bp ↔ user_service).
     from services.user_service import update_profile
     success, result = update_profile(user, data)
     if not success:
@@ -63,6 +64,8 @@ def api_update_profile():
     return jsonify({'message': '个人信息更新成功', 'data': result}), 200
 
 
+# This endpoint receives a REFRESH token (not an access token)
+# and returns a new short-lived access token.
 @auth_bp.route('/refresh', methods=['POST'])
 @jwt_required(refresh=True)
 def api_refresh():
@@ -70,6 +73,7 @@ def api_refresh():
     user = User.query.get(user_id)
     if not user or user.status != 'active':
         return jsonify({'error': '用户无效或已禁用'}), 401
+    # Inline import to avoid circular dependency.
     from flask_jwt_extended import create_access_token
     access_token = create_access_token(identity=str(user_id))
     return jsonify({'access_token': access_token}), 200
@@ -95,6 +99,7 @@ def api_change_password():
     if not user.check_password(old_pwd):
         return jsonify({'error': '旧密码不正确'}), 400
 
+    # Inline import to avoid circular dependency.
     from utils.validators import validate_password
     valid, msg = validate_password(new_pwd)
     if not valid:

@@ -12,6 +12,10 @@ export async function api(path, options = {}) {
     const refreshed = await refreshAccessToken()
     if (refreshed) {
       res = await request(path, method, body, extraHeaders)
+    } else {
+      clearToken()
+      localStorage.removeItem('auth')
+      window.dispatchEvent(new Event('auth:expired'))
     }
   }
 
@@ -64,7 +68,20 @@ async function parseResponse(res, responseType) {
   return data
 }
 
+let refreshPromise = null
+
 async function refreshAccessToken() {
+  // Single-flight: concurrent callers share the same refresh request
+  if (refreshPromise) return refreshPromise
+  refreshPromise = doRefresh()
+  try {
+    return await refreshPromise
+  } finally {
+    refreshPromise = null
+  }
+}
+
+async function doRefresh() {
   const refresh = getRefreshToken()
   if (!refresh) return false
 

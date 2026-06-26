@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import AdminLayout from './components/AdminLayout.jsx'
 import Login from './pages/Login.jsx'
 import { logout as apiLogout } from './api/index.js'
@@ -21,9 +21,21 @@ import Profile from './pages/Profile.jsx'
 
 export default function App() {
   const [auth, setAuth] = useState(() => {
-    const saved = localStorage.getItem('auth')
-    return saved ? JSON.parse(saved) : null
+    try {
+      const saved = localStorage.getItem('auth')
+      return saved ? JSON.parse(saved) : null
+    } catch {
+      localStorage.removeItem('auth')
+      return null
+    }
   })
+
+  // Listen for token expiration events from API client
+  useEffect(() => {
+    const onExpired = () => setAuth(null)
+    window.addEventListener('auth:expired', onExpired)
+    return () => window.removeEventListener('auth:expired', onExpired)
+  }, [])
 
   const handleLogin = (user) => {
     localStorage.setItem('auth', JSON.stringify(user))

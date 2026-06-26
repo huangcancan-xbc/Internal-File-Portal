@@ -20,10 +20,14 @@ class Config:
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=2)
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
 
+    # CORS (comma-separated origins, or '*' for all — NOT recommended with credentials)
+    CORS_ORIGINS = os.environ.get('CORS_ORIGINS', 'http://localhost:5173,http://localhost:3000')
+
     # File storage
     UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
     PUBLIC_FOLDER = os.path.join(UPLOAD_FOLDER, 'public')
     PRIVATE_FOLDER = os.path.join(UPLOAD_FOLDER, 'private')
+    # Flask request size limit (covers multi-file uploads in a single request).
     MAX_CONTENT_LENGTH = 100 * 1024 * 1024  # 100MB per request
 
     # File policy
@@ -34,23 +38,22 @@ class Config:
         'zip', 'rar', '7z', 'tar', 'gz', 'bz2',
         'mp3', 'mp4', 'avi', 'mov', 'wav', 'flac',
     }
+    # Blocked extensions take precedence over allowed — if an extension
+    # appears in both sets, it is blocked. See validators.py allowed_file().
     BLOCKED_EXTENSIONS = {
         'exe', 'bat', 'cmd', 'sh', 'ps1', 'vbs', 'js', 'msi', 'dll', 'scr',
     }
+    # Per-file size limit (enforced in upload_file, not by Flask).
     SINGLE_FILE_MAX_SIZE = 50 * 1024 * 1024  # 50MB
+    # Total batch upload size limit (sum of all files in one upload request).
     BATCH_MAX_SIZE = 200 * 1024 * 1024  # 200MB
 
-    # Password policy
-    PASSWORD_MIN_LENGTH = 8
+    # Password policy (only length 3-20 required)
     PASSWORD_EXPIRE_DAYS = 90
-    PASSWORD_REQUIRE_UPPER = True
-    PASSWORD_REQUIRE_LOWER = True
-    PASSWORD_REQUIRE_DIGIT = True
-    PASSWORD_REQUIRE_SPECIAL = True
 
     # Account lockout
     LOGIN_MAX_ATTEMPTS = 5
     LOGIN_LOCKOUT_MINUTES = 30
 
-    # Session
+    # Session (reserved for future use — currently not enforced by middleware)
     SESSION_TIMEOUT_MINUTES = 30

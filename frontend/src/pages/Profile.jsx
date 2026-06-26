@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { User, Save, Key } from 'lucide-react'
-import { updateUser, api } from '../api/index.js'
+import { api } from '../api/index.js'
 
 const DEPTS = ['开发', '售前', '售后']
 

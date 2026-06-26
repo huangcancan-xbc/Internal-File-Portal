@@ -1,13 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { Trash2, RotateCcw, Search, AlertTriangle } from 'lucide-react'
 import { getRecycleBin, restoreFile, permanentDeleteFile, emptyRecycleBin } from '../api/index.js'
-
-function formatSize(bytes) {
-  if (!bytes) return '-'
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB'
-  return (bytes/(1024*1024)).toFixed(1) + ' MB'
-}
+import Pagination from '../components/Pagination.jsx'
+import { formatSize } from '../utils/fileUtils.js'
 
 export default function RecycleBin() {
   const [files, setFiles] = useState([])
@@ -54,7 +49,7 @@ export default function RecycleBin() {
     return () => { cancelled = true }
   }, [page])
 
-  const handleSearch = (e) => { e.preventDefault(); setPage(1); fetchFiles() }
+  const handleSearch = (e) => { e.preventDefault(); setPage(1) }
 
   const handleRestore = async (file) => {
     try {
@@ -105,9 +100,12 @@ export default function RecycleBin() {
         )}
       </div>
 
-      <form onSubmit={handleSearch} className="relative max-w-md">
-        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-subtle)]" />
-        <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索文件名..." className={input} />
+      <form onSubmit={handleSearch} className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-md">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-subtle)]" />
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索文件名..." className={input} />
+        </div>
+        <button type="submit" className="px-4 py-2.5 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white text-sm rounded-lg cursor-pointer">搜索</button>
       </form>
 
       {error && <div className="bg-[var(--color-danger-light)] border border-red-300 dark:border-red-800 text-[var(--color-danger)] text-sm rounded-lg px-4 py-2.5">{error}</div>}
@@ -150,23 +148,7 @@ export default function RecycleBin() {
             </tbody>
           </table>
         </div>
-        <div className="px-5 py-3 border-t border-[var(--color-border)] flex items-center justify-between text-sm text-[var(--color-text-subtle)]">
-          <span><span>共 {total} 个文件</span>{loading && <span>· 加载中...</span>}</span>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setPage(p => Math.max(1, p-1))} disabled={page <= 1} className="px-3 py-1 rounded border border-[var(--color-border)] hover:bg-[var(--color-primary-light)] text-xs cursor-pointer disabled:opacity-40">上一页</button>
-            <span className="text-xs px-2">{page} / {pages || 1}</span>
-            <button onClick={() => setPage(p => p+1)} disabled={page >= pages} className="px-3 py-1 rounded border border-[var(--color-border)] hover:bg-[var(--color-primary-light)] text-xs cursor-pointer disabled:opacity-40">下一页</button>
-            {pages > 1 && (
-              <span className="flex items-center gap-1 ml-2">
-                <input type="number" min={1} max={pages} placeholder="页码"
-                  onKeyDown={e => { if (e.key === 'Enter') { const v = parseInt(e.target.value); if (v >= 1 && v <= pages) { setPage(v); e.target.value = '' } }}}
-                  className="w-14 px-2 py-1 text-xs bg-[var(--color-bg)] border border-[var(--color-border)] rounded text-center focus:outline-none focus:border-[var(--color-primary)]" />
-                <button onClick={e => { const inp = e.target.previousElementSibling; const v = parseInt(inp.value); if (v >= 1 && v <= pages) { setPage(v); inp.value = '' }}}
-                  className="px-2 py-1 rounded border border-[var(--color-border)] hover:bg-[var(--color-primary-light)] text-xs cursor-pointer">跳转</button>
-              </span>
-            )}
-          </div>
-        </div>
+        <Pagination page={page} pages={pages} total={total} loading={loading} onPageChange={setPage} totalLabel={`共 ${total} 个文件`} />
       </div>
     </div>
   )

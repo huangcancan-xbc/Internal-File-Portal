@@ -78,26 +78,6 @@ export async function resetPassword(id, newPassword) {
   return data
 }
 
-// ── Admin: User Device ──
-
-export async function getUserDevice(userId) {
-  const data = await api(`/admin/users/${userId}/device`)
-  return data.data
-}
-
-export async function updateUserDevice(userId, body) {
-  const data = await api(`/admin/users/${userId}/device`, {
-    method: 'PUT',
-    body: JSON.stringify(body),
-  })
-  return data
-}
-
-export async function clearUserDevice(userId) {
-  const data = await api(`/admin/users/${userId}/device`, { method: 'DELETE' })
-  return data
-}
-
 // ── Admin: Permissions ──
 
 export async function getPermissions(userId) {
@@ -125,6 +105,11 @@ export async function getStats() {
 export async function getFiles(params = {}) {
   const qs = new URLSearchParams(params).toString()
   const data = await api(`/files/${qs ? '?' + qs : ''}`)
+  return data.data
+}
+
+export async function getFilterOptions(scope = 'public') {
+  const data = await api(`/files/filter-options?scope=${scope}`)
   return data.data
 }
 
@@ -157,9 +142,8 @@ export async function emptyRecycleBin() {
   return data
 }
 
-export async function downloadFile(id, filename, copyType) {
-  const qs = copyType ? `?copy_type=${copyType}` : ''
-  const blob = await api(`/files/${id}/download${qs}`, { responseType: 'blob' })
+export async function downloadFile(id, filename) {
+  const blob = await api(`/files/${id}/download`, { responseType: 'blob' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -191,10 +175,10 @@ export async function moveFile(id, targetDirectoryId) {
   return data
 }
 
-export async function copyFile(id, targetDirectoryId, copyType) {
+export async function copyFile(id, targetDirectoryId) {
   const data = await api(`/files/${id}/copy`, {
     method: 'POST',
-    body: JSON.stringify({ target_directory_id: targetDirectoryId, copy_type: copyType }),
+    body: JSON.stringify({ target_directory_id: targetDirectoryId }),
   })
   return data
 }
@@ -215,10 +199,10 @@ export async function batchMoveFiles(fileIds, targetDirectoryId) {
   return data
 }
 
-export async function batchCopyFiles(fileIds, targetDirectoryId, copyType = 'internal') {
+export async function batchCopyFiles(fileIds, targetDirectoryId) {
   const data = await api('/files/batch/copy', {
     method: 'POST',
-    body: JSON.stringify({ file_ids: fileIds, target_directory_id: targetDirectoryId, copy_type: copyType }),
+    body: JSON.stringify({ file_ids: fileIds, target_directory_id: targetDirectoryId }),
   })
   return data
 }
@@ -241,6 +225,14 @@ export async function createDirectory(body) {
 
 export async function deleteDirectory(id) {
   await api(`/files/directories/${id}`, { method: 'DELETE' })
+}
+
+export async function renameDirectory(id, name) {
+  const data = await api(`/files/directories/${id}/rename`, {
+    method: 'PUT',
+    body: JSON.stringify({ name }),
+  })
+  return data
 }
 
 // ── Recycle Bin ──
@@ -289,28 +281,20 @@ export async function updateConfig(body) {
 // ── Announcements ──
 
 export async function getAnnouncements() {
-  const data = await api('/announce/')
+  const data = await api('/announcements/')
   return data.data
 }
 
 export async function createAnnouncement(body) {
-  const data = await api('/announce/', {
+  const data = await api('/announcements/', {
     method: 'POST',
     body: JSON.stringify(body),
   })
   return data
 }
 
-export async function updateAnnouncement(id, body) {
-  const data = await api(`/announce/${id}`, {
-    method: 'PUT',
-    body: JSON.stringify(body),
-  })
-  return data
-}
-
 export async function deleteAnnouncement(id) {
-  await api(`/announce/${id}`, { method: 'DELETE' })
+  await api(`/announcements/${id}`, { method: 'DELETE' })
 }
 
 // ── Profile ──

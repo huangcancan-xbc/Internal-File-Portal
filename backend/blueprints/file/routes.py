@@ -2,32 +2,32 @@ from flask import request, jsonify
 from flask_jwt_extended import jwt_required
 from blueprints.file import file_bp
 from utils.permissions import get_current_user
+from utils.validators import validate_scope
 from services import file_service
 
 
-def _require_user():
-    user = get_current_user()
-    if not user:
-        return None, jsonify({'error': '用户不存在'}), 404
-    return user, None, None
-
-
 def _user_or_404():
+    """Return (user, None) or (None, error_response)."""
     user = get_current_user()
     if not user:
         return None, (jsonify({'error': '用户不存在'}), 404)
     return user, None
 
 
-# ── File Upload ──
+# ── File Operations ──
+# All routes require JWT authentication. Admin-only operations are enforced
+# at the service layer (not with @admin_required decorator) because some
+# operations have nuanced permission logic (e.g. public vs private scope).
 
 @file_bp.route('/upload', methods=['POST'])
 @jwt_required()
 def upload():
-    user, err, code = _require_user()
-    if err: return err, code
+    user, err = _user_or_404()
+    if err: return err
     files = request.files.getlist('files')
     scope = request.form.get('scope', 'public')
+    if not validate_scope(scope):
+        return jsonify({'error': 'scope 必须为 public 或 private'}), 400
     directory_id = request.form.get('directory_id', type=int)
     success, result = file_service.upload_file(user, files, directory_id, scope)
     if not success:
@@ -42,8 +42,7 @@ def upload():
 def download(file_id):
     user, err = _user_or_404()
     if err: return err
-    copy_type = request.args.get('copy_type')
-    success, result = file_service.download_file(user, file_id, copy_type=copy_type)
+    success, result = file_service.download_file(user, file_id)
     if not success:
         return jsonify({'error': result}), 400
     return result
@@ -70,12 +69,30 @@ def list_files():
     user, err = _user_or_404()
     if err: return err
     scope = request.args.get('scope', 'public')
+    if not validate_scope(scope):
+        return jsonify({'error': 'scope 必须为 public 或 private'}), 400
     directory_id = request.args.get('directory_id', type=int)
     page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 20, type=int)
+    per_page = min(request.args.get('per_page', 20, type=int), 100)
     keyword = request.args.get('keyword')
     file_type = request.args.get('file_type')
-    result = file_service.list_files(user, scope, directory_id, page, per_page, keyword, file_type)
+    uploader = request.args.get('uploader')
+    sort_by = request.args.get('sort_by', 'created_at')
+    sort_order = request.args.get('sort_order', 'desc')
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    result = file_service.list_files(user, scope, directory_id, page, per_page, keyword, file_type, uploader, sort_by, sort_order, start_date, end_date)
+    return jsonify({'data': result}), 200
+
+
+@file_bp.route('/filter-options', methods=['GET'])
+@jwt_required()
+def get_filter_options():
+    """Return available file types and uploaders for filter dropdowns."""
+    user, err = _user_or_404()
+    if err: return err
+    scope = request.args.get('scope', 'public')
+    result = file_service.get_filter_options(user, scope)
     return jsonify({'data': result}), 200
 
 
@@ -131,7 +148,6 @@ def batch_copy_files():
     success, result = file_service.batch_copy_files(
         user, data.get('file_ids'),
         target_directory_id=data.get('target_directory_id'),
-        copy_type=data.get('copy_type', 'internal'),
     )
     if not success:
         return jsonify({'error': result}), 400
@@ -144,7 +160,7 @@ def list_recycle_bin():
     user, err = _user_or_404()
     if err: return err
     page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 20, type=int)
+    per_page = min(request.args.get('per_page', 20, type=int), 100)
     keyword = request.args.get('keyword')
     result = file_service.list_deleted_files(user, page, per_page, keyword)
     return jsonify({'data': result}), 200
@@ -213,6 +229,7 @@ def move_file(file_id):
     return jsonify({'message': '移动成功', 'data': result}), 200
 
 
+# Returns 201 (Created) because a new file record is produced.
 @file_bp.route('/<int:file_id>/copy', methods=['POST'])
 @jwt_required()
 def copy_file(file_id):
@@ -222,7 +239,6 @@ def copy_file(file_id):
     success, result = file_service.copy_file(
         user, file_id,
         target_directory_id=data.get('target_directory_id'),
-        copy_type=data.get('copy_type', 'internal'),
     )
     if not success:
         return jsonify({'error': result}), 400
@@ -250,9 +266,12 @@ def create_directory():
     data = request.get_json()
     if not data or not data.get('name', '').strip():
         return jsonify({'error': '目录名不能为空'}), 400
+    scope = data.get('scope', 'public')
+    if scope == 'private' and not user.is_admin():
+        return jsonify({'error': '普通用户无权创建私人目录'}), 403
     success, result = file_service.create_directory(
         user, data['name'].strip(),
-        scope=data.get('scope', 'public'),
+        scope=scope,
         parent_id=data.get('parent_id'),
     )
     if not success:
@@ -269,3 +288,17 @@ def delete_directory(dir_id):
     if not success:
         return jsonify({'error': result}), 400
     return jsonify({'message': result}), 200
+
+
+@file_bp.route('/directories/<int:dir_id>/rename', methods=['PUT'])
+@jwt_required()
+def rename_directory(dir_id):
+    user, err = _user_or_404()
+    if err: return err
+    data = request.get_json()
+    if not data or not data.get('name', '').strip():
+        return jsonify({'error': '目录名不能为空'}), 400
+    success, result = file_service.rename_directory(user, dir_id, data['name'].strip())
+    if not success:
+        return jsonify({'error': result}), 400
+    return jsonify({'message': '目录重命名成功', 'data': result}), 200

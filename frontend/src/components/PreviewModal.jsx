@@ -1,56 +1,16 @@
 import { useState, useEffect } from 'react'
 import { X, Download, Loader } from 'lucide-react'
 import { marked } from 'marked'
-
-const BASE_URL = '/api'
+import DOMPurify from 'dompurify'
+import { api } from '../api/index.js'
 
 const IMAGE_EXTS = new Set(['jpg','jpeg','png','gif','svg','webp','ico','bmp'])
 const TEXT_EXTS = new Set(['txt','csv','json','xml','yaml','yml','log','html','htm','css','js','py','sh'])
 const MD_EXTS = new Set(['md','markdown'])
 const OFFICE_EXTS = new Set(['docx','doc','xlsx','xls'])
 
-// Fetch with JWT auto-refresh (same pattern as api/index.js)
-function getToken() { return localStorage.getItem('access_token') }
-function getRefreshToken() { return localStorage.getItem('refresh_token') }
-
-async function refreshToken() {
-  const refresh = getRefreshToken()
-  if (!refresh) return false
-  try {
-    const res = await fetch(`${BASE_URL}/auth/refresh`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${refresh}` }
-    })
-    if (!res.ok) return false
-    const data = await res.json()
-    localStorage.setItem('access_token', data.access_token)
-    return true
-  } catch { return false }
-}
-
-async function fetchWithAuth(path, options = {}) {
-  let token = getToken()
-  let headers = { ...options.headers, 'Authorization': `Bearer ${token}` }
-  let res = await fetch(`${BASE_URL}${path}`, { ...options, headers })
-
-  if (res.status === 401 && getRefreshToken()) {
-    const ok = await refreshToken()
-    if (ok) {
-      token = getToken()
-      headers['Authorization'] = `Bearer ${token}`
-      res = await fetch(`${BASE_URL}${path}`, { ...options, headers })
-    }
-  }
-  return res
-}
-
 async function fetchPreview(fileId) {
-  const res = await fetchWithAuth(`/files/${fileId}/preview`)
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}))
-    throw new Error(err.error || '预览失败')
-  }
-  return res
+  return api(`/files/${fileId}/preview`, { responseType: 'blob' })
 }
 
 const markdownCss = `
@@ -83,33 +43,33 @@ export default function PreviewModal({ file, onClose }) {
 
   useEffect(() => {
     if (!file) return
+    let cancelled = false
     setLoading(true)
     setError('')
+    setContent(null)
     ;(async () => {
       try {
-        const res = await fetchPreview(file.id)
+        const blob = await fetchPreview(file.id)
+        if (cancelled) return
 
-        if (MD_EXTS.has(ext) || OFFICE_EXTS.has(ext)) {
-          const text = await res.text()
-          if (res.headers.get('Content-Type')?.includes('text/html')) {
-            setContent({ type: 'html', data: text })
-          } else {
-            const html = await marked.parse(text)
-            setContent({ type: 'html', data: html + `<style>${markdownCss}</style>` })
-          }
+        if (OFFICE_EXTS.has(ext)) {
+          // Office files are converted to HTML by the backend
+          const text = await blob.text()
+          setContent({ type: 'html', data: DOMPurify.sanitize(text) })
+        } else if (MD_EXTS.has(ext)) {
+          const text = await blob.text()
+          const raw = await marked.parse(text)
+          setContent({ type: 'html', data: DOMPurify.sanitize(raw) + `<style>${markdownCss}</style>` })
         } else if (ext === 'pdf') {
-          // Explicit MIME type — res.blob() may lose it
-          const buf = await res.arrayBuffer()
-          const blob = new Blob([buf], { type: 'application/pdf' })
-          setContent({ type: 'blob', data: URL.createObjectURL(blob), mime: 'application/pdf' })
+          const buf = await blob.arrayBuffer()
+          const pdfBlob = new Blob([buf], { type: 'application/pdf' })
+          setContent({ type: 'blob', data: URL.createObjectURL(pdfBlob), mime: 'application/pdf' })
         } else if (IMAGE_EXTS.has(ext)) {
-          const blob = await res.blob()
           setContent({ type: 'blob', data: URL.createObjectURL(blob), mime: mime })
         } else if (TEXT_EXTS.has(ext)) {
-          const text = await res.text()
+          const text = await blob.text()
           setContent({ type: 'text', data: text })
         } else {
-          const blob = await res.blob()
           const url = URL.createObjectURL(blob)
           window.open(url, '_blank')
           setTimeout(() => URL.revokeObjectURL(url), 60000)
@@ -117,11 +77,12 @@ export default function PreviewModal({ file, onClose }) {
           return
         }
       } catch (err) {
-        setError(err.message)
+        if (!cancelled) setError(err.message)
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     })()
+    return () => { cancelled = true }
   }, [file?.id])
 
   useEffect(() => {
@@ -187,7 +148,7 @@ export default function PreviewModal({ file, onClose }) {
           )}
 
           {!loading && !error && content?.type === 'blob' && ext === 'pdf' && (
-            <embed src={content.data} type="application/pdf" className="w-full h-full min-h-[70vh]" />
+            <iframe src={content.data} title={file.original_filename} className="w-full h-full min-h-[70vh] border-0" />
           )}
 
           {!loading && !error && content?.type === 'blob' && IMAGE_EXTS.has(ext) && (

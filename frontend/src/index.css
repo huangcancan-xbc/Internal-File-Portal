@@ -305,9 +305,9 @@ main > .space-y-6 > *:nth-child(5) { animation-delay: 0.25s; }
   background: linear-gradient(135deg,
     transparent 0%,
     transparent 40%,
-    var(--scan-accent, rgba(59,130,246,0.12)) 48%,
-    var(--scan-glow, rgba(100,160,255,0.25)) 50%,
-    var(--scan-accent, rgba(59,130,246,0.12)) 52%,
+    color-mix(in srgb, var(--scan-color, #3B82F6) 25%, transparent) 48%,
+    color-mix(in srgb, var(--scan-color, #3B82F6) 50%, transparent) 50%,
+    color-mix(in srgb, var(--scan-color, #3B82F6) 25%, transparent) 52%,
     transparent 60%,
     transparent 100%
   );

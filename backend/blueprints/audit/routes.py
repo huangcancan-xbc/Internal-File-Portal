@@ -6,7 +6,11 @@ from services import audit_service
 
 
 def _parse_filters():
-    """Extract common filter params from request args into a dict."""
+    """Extract common filter params from request args into a dict.
+
+    Note: user_account and username are partial-match (LIKE) at the service layer;
+    module, action, ip, status are exact-match.
+    """
     return {
         'module': request.args.get('module'),
         'action': request.args.get('action'),
@@ -21,10 +25,10 @@ def _parse_filters():
 
 
 def _parse_pagination():
-    """Extract pagination params from request args."""
+    """Extract pagination params from request args (per_page capped at 200)."""
     return (
         request.args.get('page', 1, type=int),
-        request.args.get('per_page', 50, type=int),
+        min(request.args.get('per_page', 50, type=int), 200),
     )
 
 
@@ -52,10 +56,14 @@ def get_audit_logs():
 @jwt_required()
 @admin_required
 def get_copy_audits():
+    """Query copy-specific audit logs.
+
+    Uses a separate (narrower) filter set than _parse_filters() because
+    CopyAudit has no module/action/status columns.
+    """
     page, per_page = _parse_pagination()
     filters = {
         'user_account': request.args.get('user_account'),
-        'copy_type': request.args.get('copy_type'),
         'start_date': request.args.get('start_date'),
         'end_date': request.args.get('end_date'),
         'hide_deleted': request.args.get('hide_deleted', '0') == '1',
