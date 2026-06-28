@@ -1,45 +1,77 @@
 # 文件全流程管控系统
 
-> 💼 **实习项目**
+> 📁 项目背景
 >
-> 这个项目是我 **实习期间独立负责** 的，一个给公司内部用的 **文件管理系统**。我们公司有一点军工保密性质，对文件管控这块要求比较特殊，但说实话，市面上开源的方案其实够用的，调整调整完全能跑起来。可公司偏不，非要自己开发，我也不太理解……感觉很多单位都这样，非要自己动手，我其实挺感慨的：都 2026 年了，开源世界这么庞大，宁愿自己造轮子也不用现成的。所以说，市场真的没有想象中那么饱和。
+> 这是我实习期间负责开发的一个企业内部文件全流程管控系统。
 >
-> 项目比较急，公司又提倡用 AI 提效，高级工程师就告诉我说："别从零手写了，用 AI 快速出成果。" 还明确指定了技术栈，于是我就 Vibe Coding 半天时间把 POC 撸出来了。说实话，代码质量肯定还有提升空间，也存在一些小 BUG，但基本功能已经能跑了，该有的都有：用户管理、权限控制、文件上传下载、审计日志……该有的都有。
+> 项目来源于公司实际业务需求，由 XX（高级工程师）负责核心需求设计与技术选型，我根据明确的功能要求、业务流程及指定技术栈独立完成系统开发与交付。由于项目研发周期紧、交付要求高，公司积极鼓励引入 AI 生产力工具提效。
+>
+> 因此，整个项目采用了 **"需求驱动 + Multi-Agent 协同开发 + 自动化与人工双重 Code Review"** 的开发模式。我基于 **Hermes Agent** 与 **Claude Code** 辅助完成需求拆解、任务规划、代码生成、模块开发、重构及问题排查，并结合 Agent 自动化 Code Review、功能测试以及人工业务逻辑验证，对代码质量、异常处理和边界场景进行持续优化，最终完成了一个可部署、可运行的企业内部管理系统。
+>
+> 该系统主要部署于公司内网，面向部分内部员工使用，重点关注文件全生命周期管理、权限控制、操作审计和安全访问等能力，非常适用于小团队、企业内网以及对数据安全、权限管理要求较高的场景（如军工、保密单位等）。
 
-轻量的企业级内部文件全流程管控系统，适用于小团队、保密单位、军工企业等内部使用。
+## 📺 项目演示
+
+[![Bilibili](https://img.shields.io/badge/Bilibili-项目演示-FE2C55?style=for-the-badge&logo=bilibili&logoColor=white)](https://www.bilibili.com/video/BV1EWTK6iEV4/)
 
 ---
 
 ## 目录
 
-- [功能特性](#功能特性)
-- [技术栈](#技术栈)
-- [项目结构](#项目结构)
-- [快速开始（开发环境）](#快速开始开发环境)
-- [Docker 一键部署（推荐）](#docker-一键部署推荐)
-- [传统手动部署](#传统手动部署)
-- [配置说明](#配置说明)
-- [API 接口](#api-接口)
-- [安全特性](#安全特性)
-- [运维操作](#运维操作)
-- [常见问题](#常见问题)
+- [📺 项目演示](#-项目演示)
+- [1. 项目特点](#1-项目特点)
+- [2. 功能特性](#2-功能特性)
+- [3. 技术栈](#3-技术栈)
+- [4. 项目结构](#4-项目结构)
+- [5. 快速开始（开发环境）](#5-快速开始开发环境)
+- [6. 部署方案](#6-部署方案)
+  - [6.1. Docker 一键部署（推荐）](#61-docker-一键部署推荐)
+  - [6.2. 传统手动部署](#62-传统手动部署)
+- [7. 配置说明](#7-配置说明)
+- [8. API 接口](#8-api-接口)
+- [9. 运维操作](#9-运维操作)
+- [10. 常见问题](#10-常见问题)
 
 ---
 
-## 功能特性
+## 1. 项目特点
 
-- **文件管理**：文件上传/下载/预览，支持公开/私有两种空间，目录管理
-- **用户管理**：用户注册/登录，角色权限控制（管理员/普通用户）
-- **权限系统**：细粒度位掩码权限（查看/上传/下载/导出/拷贝/目录管理），按公开/私有空间独立配置
-- **审计日志**：完整的操作日志记录，文件拷贝专项审计
-- **公告管理**：系统公告发布与管理
-- **回收站**：文件软删除/恢复/永久删除
-- **安全策略**：密码策略、账户锁定、会话超时、JWT 双 Token 认证
-- **文件过滤**：扩展名黑白名单，防止恶意文件上传
+-   **真实企业项目**：来源于实际业务需求，完整经历需求分析、功能开发、测试调试、部署交付等开发流程，并非个人练手 Demo。
+-   **AI 工程实践**：基于 Hermes Agent Kanban（多 Profile、多 Agent 协同）与 Claude Code 构建 AI 辅助开发流程，完成需求拆解、任务规划、代码生成、重构、调试及自动化 Code Review，在保证代码质量的前提下显著提升研发效率。
+-   **代码质量保障**：结合 Agent 自动化 Code Review 与人工测试，对业务逻辑、权限控制、异常处理及边界条件进行验证与优化，确保系统稳定运行。
+-   **完整业务功能**：实现用户管理、RBAC 权限控制、文件上传下载、分片上传、目录管理、文件分享、操作日志、审计记录等核心模块。
+-   **工程化实践**：支持 Docker Compose 一键部署，兼容 MySQL、SQLite、PostgreSQL 等数据库，可根据不同环境快速部署与扩展。
+-   **独立完成项目交付**：在既定需求、业务流程及技术栈基础上，独立完成系统设计细化、数据库设计、前后端开发、接口联调、部署测试及文档编写，并借助 AI Agent 提升开发效率，实现项目快速交付。
 
 ---
 
-## 技术栈
+## 2. 功能特性
+
+| 模块 | 功能说明 |
+|---|---|
+| **文件管理** | 文件上传/下载/预览，支持公开/私有两种空间，目录管理 |
+| **用户管理** | 用户注册/登录，角色权限控制（管理员/普通用户） |
+| **权限系统** | 细粒度位掩码权限（查看/上传/下载/导出/拷贝/目录管理），按公开/私有空间独立配置 |
+| **审计日志** | 完整的操作日志记录，文件拷贝专项审计 |
+| **公告管理** | 系统公告发布与管理 |
+| **回收站** | 文件软删除/恢复/永久删除 |
+| **安全策略** | 密码策略、账户锁定、会话超时、JWT 双 Token 认证 |
+| **文件过滤** | 扩展名黑白名单，防止恶意文件上传 |
+
+### 安全特性
+
+- ✅ JWT 双 Token 认证（Access 2h + Refresh 30d，前端自动续期）
+- ✅ 密码加密存储（Werkzeug bcrypt）
+- ✅ 账户锁定机制（5 次失败锁定 30 分钟）
+- ✅ 会话超时控制
+- ✅ 文件扩展名黑白名单
+- ✅ 位掩码权限系统（细粒度按目录/空间控制）
+- ✅ 完整的审计日志（操作记录 + 拷贝专项审计）
+- ✅ CORS 跨域控制
+
+---
+
+## 3. 技术栈
 
 | 层 | 技术 |
 |---|---|
@@ -51,7 +83,7 @@
 
 ---
 
-## 项目结构
+## 4. 项目结构
 
 ```
 文件全流程管控系统/
@@ -78,7 +110,7 @@
 │   │   ├── audit/                  # 审计接口（/api/audit）
 │   │   └── announce/               # 公告接口（/api/announcements）
 │   ├── utils/                      # 工具函数（权限校验、文件验证、请求处理）
-│   ├── middleware/                  # 中间件（CORS 配置）
+│   ├── middleware/                 # 中间件（CORS 配置）
 │   └── uploads/                    # 文件存储目录
 │       ├── public/                 # 公开文件
 │       └── private/                # 私有文件（按用户目录隔离）
@@ -99,9 +131,9 @@
 
 ---
 
-## 快速开始（开发环境）
+## 5. 快速开始（开发环境）
 
-### 后端
+### 5.1 后端
 
 ```bash
 cd backend
@@ -114,11 +146,11 @@ python -m venv .venv
 # 安装依赖
 pip install -r requirements.txt
 
-# 启动（默认 http://localhost:5000）
+# 启动（默认 http://localhost: 5000）
 python app.py
 ```
 
-### 前端
+### 5.2 前端
 
 ```bash
 cd frontend
@@ -126,11 +158,11 @@ cd frontend
 # 安装依赖
 npm install
 
-# 启动开发服务器（默认 http://localhost:5173，自动代理 /api 到后端）
+# 启动开发服务器（默认 http://localhost: 5173，自动代理 /api 到后端）
 npm run dev
 ```
 
-### 默认管理员账号
+### 5.3 默认管理员账号
 
 | 角色 | 账号 | 密码 |
 |---|---|---|
@@ -140,11 +172,18 @@ npm run dev
 
 ---
 
-## Docker 一键部署（推荐）
+## 6. 部署方案
 
-适合快速部署、标准化交付、多机部署。
+系统提供两种部署方式，根据实际环境选择：
 
-### 第一步：准备部署包
+| 方式 | 适用场景 | 复杂度 |
+|---|---|---|
+| **Docker 一键部署** | 快速部署、标准化交付、多机部署 | 低 |
+| **传统手动部署** | 无 Docker 环境、开发调试、精细控制 | 中 |
+
+### 6.1 Docker 一键部署（推荐）
+
+#### 6.1.1 准备部署包
 
 将以下文件/目录拷贝到目标机器：
 
@@ -162,13 +201,13 @@ nginx.conf
 cd frontend && npm install && npm run build
 ```
 
-### 第二步：配置环境变量
+#### 6.1.2 配置环境变量
 
 ```bash
 cp .env.example .env
 ```
 
-编辑 `.env`，**必须修改**以下项：
+编辑 `.env`，**必须修改** 以下项：
 
 ```ini
 # MySQL root 密码
@@ -190,7 +229,7 @@ JWT_SECRET_KEY=your-random-jwt-secret-key
 > -join ((1..32) | ForEach-Object { '{0:x}' -f (Get-Random -Max 16) })
 > ```
 
-### 第三步：启动服务
+#### 6.1.3 启动服务
 
 ```bash
 # 构建并启动（首次运行或代码变更后加 --build）
@@ -203,7 +242,7 @@ docker-compose ps
 docker-compose logs -f
 ```
 
-### 第四步：验证
+#### 6.1.4 验证
 
 ```bash
 # 后端健康检查（应返回 401）
@@ -217,11 +256,9 @@ curl -I http://localhost
 
 ---
 
-## 传统手动部署
+### 6.2 传统手动部署
 
-适合无 Docker 环境、开发调试、或需要精细控制的场景。
-
-### 环境要求
+#### 6.2.1 环境要求
 
 | 软件 | 最低版本 | 说明 |
 |---|---|---|
@@ -230,7 +267,7 @@ curl -I http://localhost
 | Node.js | 18+ | 仅构建前端时需要 |
 | Nginx | 1.20+ | 生产环境反向代理（可选） |
 
-### 1. 创建数据库
+#### 6.2.2 创建数据库
 
 ```sql
 CREATE DATABASE file_control
@@ -238,7 +275,7 @@ CREATE DATABASE file_control
   COLLATE utf8mb4_unicode_ci;
 ```
 
-### 2. 部署后端
+#### 6.2.3 部署后端
 
 ```bash
 cd backend
@@ -277,7 +314,7 @@ pip install waitress
 waitress-serve --host=0.0.0.0 --port=5000 --threads=4 app:create_app
 ```
 
-### 3. 构建前端
+#### 6.2.4 构建前端
 
 ```bash
 cd frontend
@@ -287,7 +324,7 @@ npm run build
 
 构建产物生成在 `frontend/dist/`。
 
-### 4. 配置 Nginx
+#### 6.2.5 配置 Nginx
 
 ```nginx
 server {
@@ -318,7 +355,7 @@ server {
 }
 ```
 
-### 5. 配置 Systemd 服务（Linux 生产环境）
+#### 6.2.6 配置 Systemd 服务（Linux 生产环境）
 
 创建 `/etc/systemd/system/file-control.service`：
 
@@ -359,9 +396,9 @@ sudo systemctl enable --now file-control
 
 ---
 
-## 配置说明
+## 7. 配置说明
 
-### 环境变量
+### 7.1 环境变量
 
 | 变量名 | 说明 | 默认值 |
 |---|---|---|
@@ -370,7 +407,7 @@ sudo systemctl enable --now file-control
 | `JWT_SECRET_KEY` | JWT 签名密钥 | `jwt-dev-secret-key-...` |
 | `CORS_ORIGINS` | 允许的跨域来源（逗号分隔） | `http://localhost:5173,http://localhost:3000` |
 
-### config.py 内置配置项
+### 7.2 config.py 内置配置项
 
 以下配置需直接修改 `backend/config.py`：
 
@@ -388,7 +425,7 @@ sudo systemctl enable --now file-control
 | `JWT_ACCESS_TOKEN_EXPIRES` | Access Token 有效期 | 2 小时 |
 | `JWT_REFRESH_TOKEN_EXPIRES` | Refresh Token 有效期 | 30 天 |
 
-### 数据库
+### 7.3 数据库
 
 应用首次启动时自动执行：
 
@@ -411,11 +448,11 @@ sudo systemctl enable --now file-control
 
 ---
 
-## API 接口
+## 8. API 接口
 
 共 **43 个接口**，分布在 5 个蓝图中。所有接口返回 `{ data: ... }` 或 `{ error: ... }` 格式。
 
-### 认证模块 `/api/auth`
+### 8.1 认证模块 `/api/auth`
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -426,7 +463,7 @@ sudo systemctl enable --now file-control
 | POST | `/api/auth/refresh` | 刷新 Access Token |
 | POST | `/api/auth/change-password` | 修改密码 |
 
-### 管理模块 `/api/admin`（需管理员权限）
+### 8.2 管理模块 `/api/admin`（需管理员权限）
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -442,7 +479,7 @@ sudo systemctl enable --now file-control
 | GET | `/api/admin/config` | 获取系统配置 |
 | PUT | `/api/admin/config` | 更新系统配置 |
 
-### 文件模块 `/api/files`（需登录）
+### 8.3 文件模块 `/api/files`（需登录）
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -467,7 +504,7 @@ sudo systemctl enable --now file-control
 | DELETE | `/api/files/directories/<id>` | 删除目录 |
 | PUT | `/api/files/directories/<id>/rename` | 重命名目录 |
 
-### 审计模块 `/api/audit`（需管理员权限）
+### 8.4 审计模块 `/api/audit`（需管理员权限）
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -475,7 +512,7 @@ sudo systemctl enable --now file-control
 | GET | `/api/audit/log-options` | 获取日志筛选下拉选项 |
 | GET | `/api/audit/copy` | 拷贝专项审计日志 |
 
-### 公告模块 `/api/announcements`
+### 8.5 公告模块 `/api/announcements`
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -485,22 +522,9 @@ sudo systemctl enable --now file-control
 
 ---
 
-## 安全特性
+## 9. 运维操作
 
-- ✅ JWT 双 Token 认证（Access 2h + Refresh 30d，前端自动续期）
-- ✅ 密码加密存储（Werkzeug bcrypt）
-- ✅ 账户锁定机制（5 次失败锁定 30 分钟）
-- ✅ 会话超时控制
-- ✅ 文件扩展名黑白名单
-- ✅ 位掩码权限系统（细粒度按目录/空间控制）
-- ✅ 完整的审计日志（操作记录 + 拷贝专项审计）
-- ✅ CORS 跨域控制
-
----
-
-## 运维操作
-
-### 服务管理
+### 9.1 服务管理
 
 ```bash
 # Docker
@@ -517,7 +541,7 @@ sudo systemctl restart file-control
 journalctl -u file-control -f     # 查看日志
 ```
 
-### 数据备份与恢复
+### 9.2 数据备份与恢复
 
 ```bash
 # 备份数据库
@@ -533,7 +557,7 @@ tar czf uploads_backup.tar.gz backend/uploads/
 docker-compose exec db mysqldump -u root -p file_control > backup.sql
 ```
 
-### 更新部署
+### 9.3 更新部署
 
 ```bash
 # 1. 拉取最新代码 / 替换文件
@@ -549,7 +573,7 @@ pip install -r requirements.txt
 # 重启后端服务
 ```
 
-### HTTPS 配置（Let's Encrypt）
+### 9.4 HTTPS 配置（Let's Encrypt）
 
 ```bash
 sudo apt install certbot python3-certbot-nginx
@@ -558,36 +582,36 @@ sudo certbot --nginx -d your-domain.com
 
 ---
 
-## 常见问题
+## 10. 常见问题
 
-### 1. `ModuleNotFoundError: No module named 'flask'`
+### 10.1 `ModuleNotFoundError: No module named 'flask'`
 
 使用了全局 Python 而非虚拟环境。确保激活了 `.venv`。
 
-### 2. 数据库连接失败
+### 10.2 数据库连接失败
 
 - 确认 MySQL 已启动，`DATABASE_URL` 中的用户名/密码/端口正确
 - Docker 环境中数据库主机名应为 `db`（容器名），而非 `localhost`
 
-### 3. 前端页面空白 / 404
+### 10.3 前端页面空白 / 404
 
 - 确认已执行 `npm run build` 生成 `dist/`
 - 确认 Nginx 的 `root` 路径正确，且配置了 `try_files $uri $uri/ /index.html`
 
-### 4. 上传文件失败
+### 10.4 上传文件失败
 
 - 检查 `uploads/` 目录存在且有写入权限
 - 检查文件大小是否超过 50MB（`SINGLE_FILE_MAX_SIZE`）
 - 检查扩展名是否在允许列表中
 - Nginx 环境下检查 `client_max_body_size`
 
-### 5. Token 过期 / 频繁登出
+### 10.5 Token 过期 / 频繁登出
 
 - Access Token 默认 2h 过期，前端自动用 Refresh Token 续期
 - Refresh Token 默认 30d 过期，过期后需重新登录
 - 可在 `config.py` 中调整有效期
 
-### 6. Docker 构建慢
+### 10.6 Docker 构建慢
 
 配置国内镜像加速，编辑 `/etc/docker/daemon.json`：
 
@@ -600,6 +624,6 @@ sudo certbot --nginx -d your-domain.com
 }
 ```
 
-### 7. 中文文件名乱码
+### 10.7 中文文件名乱码
 
 确保数据库连接字符串包含 `?charset=utf8mb4`，MySQL 使用 `utf8mb4` 字符集。
